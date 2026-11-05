@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Platform,
 } from 'react-native'
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
 import { LayoutDashboard, Compass, User, ShieldCheck } from 'lucide-react-native'
 import { ThemeProvider, useTheme } from './src/context/ThemeContext'
@@ -22,7 +22,7 @@ type TabType = 'dashboard' | 'discover' | 'profile'
 
 function MainNavigator() {
   const { isAuthenticated, isLoading } = useAuth()
-  const { colors, mode } = useTheme()
+  const { colors } = useTheme()
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard')
 
   if (isLoading) {
@@ -119,7 +119,7 @@ function MainNavigator() {
 function ThemedAppContainer() {
   const { colors, mode } = useTheme()
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={['top', 'left', 'right']}>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
       <AuthProvider>
         <TradeProvider>
@@ -132,9 +132,11 @@ function ThemedAppContainer() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <ThemedAppContainer />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ThemedAppContainer />
+      </ThemeProvider>
+    </SafeAreaProvider>
   )
 }
 

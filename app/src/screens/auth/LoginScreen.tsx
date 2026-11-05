@@ -3,29 +3,29 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Linking,
   Platform,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   ShieldCheck,
   Fingerprint,
   Lock,
-  EyeOff,
-  Cpu,
   ArrowRight,
-  CheckCircle2,
-  Sparkles,
   Sun,
   Moon,
+  Sparkles,
+  Cpu,
+  UserCheck,
 } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
-import { BackendStatusCard } from '../../components/BackendStatusCard'
+// import { BackendStatusCard } from '../../components/BackendStatusCard'
 
 export function LoginScreen() {
+  const insets = useSafeAreaInsets()
   const { simulateSandboxLogin, isLoading } = useAuth()
   const { colors, mode, toggleTheme } = useTheme()
   const [isVerifying, setIsVerifying] = useState(false)
@@ -42,14 +42,14 @@ export function LoginScreen() {
       if (supported) {
         await Linking.openURL(deepLinkUrl)
       } else {
-        setNotice('World App not detected on device. Running Sandbox ZK proof simulator...')
+        setNotice('World App not detected. Launching Sandbox demo...')
         setTimeout(() => {
           simulateSandboxLogin()
           setIsVerifying(false)
         }, 1200)
       }
     } catch {
-      setNotice('Launching zero-knowledge verification simulator...')
+      setNotice('Running verification...')
       setTimeout(() => {
         simulateSandboxLogin()
         setIsVerifying(false)
@@ -59,474 +59,287 @@ export function LoginScreen() {
 
   const handleSandboxVerify = async () => {
     setIsVerifying(true)
-    setNotice('Generating client-side zk-SNARK nullifier proof...')
+    setNotice('Generating zero-knowledge proof...')
     await simulateSandboxLogin()
     setIsVerifying(false)
   }
 
-  const guarantees = [
-    {
-      icon: ShieldCheck,
-      title: 'Zero-Knowledge Proofs',
-      desc: 'Prove your humanness without disclosing names, biometrics, or emails. The server only sees a unique nullifier hash.',
-      tag: 'zk-SNARK',
-    },
-    {
-      icon: Fingerprint,
-      title: 'Strict Sybil Resistance',
-      desc: 'One human, one account. Eliminates automated bot farms and multi-account manipulation while preserving total anonymity.',
-      tag: '1 Human = 1 Seat',
-    },
-    {
-      icon: EyeOff,
-      title: 'Zero Cross-App Tracking',
-      desc: 'Nullifier hashes are deterministically salted per app. No entity can correlate your activity across different web services.',
-      tag: 'Unlinkable',
-    },
-    {
-      icon: Lock,
-      title: 'Hardware Enclave Security',
-      desc: 'Private keys remain protected within your device secure element. No credentials travel across the wire.',
-      tag: 'Self-Sovereign',
-    },
-  ]
-
-  const comparisons = [
-    {
-      feature: 'Personal Data Required',
-      traditional: 'Email, phone, passport, KYC',
-      syndicate: 'Zero personal data (Zero-Knowledge)',
-    },
-    {
-      feature: 'Bot & Sybil Prevention',
-      traditional: 'Vulnerable to CAPTCHAs & proxies',
-      syndicate: 'Mathematically guaranteed human',
-    },
-    {
-      feature: 'Cross-Site Tracking',
-      traditional: 'Tracked via cookies & OAuth IDs',
-      syndicate: 'Unlinkable deterministic nullifier',
-    },
-    {
-      feature: 'Credential Leak Risk',
-      traditional: 'Centralized database breaches',
-      syndicate: 'Keys stay inside device enclave',
-    },
-  ]
-
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.bg }]}
-      contentContainerStyle={styles.contentContainer}
+    <View
+      style={[
+        styles.screen,
+        {
+          backgroundColor: colors.bg,
+          paddingTop: Math.max(insets.top, Platform.OS === 'android' ? 16 : 0),
+          paddingBottom: Math.max(insets.bottom, 24),
+        },
+      ]}
     >
-      {/* Brand Header */}
-      <View style={styles.header}>
-        <View style={styles.logoRow}>
-          <View style={[styles.logoBox, { backgroundColor: colors.accent }]}>
-            <ShieldCheck size={20} color={colors.textInverse} strokeWidth={2.5} />
+      {/* Minimal Top Brand Bar */}
+      <View style={styles.topBar}>
+        <View style={styles.brandRow}>
+          <View style={[styles.brandIcon, { backgroundColor: colors.accent }]}>
+            <ShieldCheck size={18} color={colors.textInverse} strokeWidth={2.5} />
           </View>
-          <View>
-            <Text style={[styles.logoTitle, { color: colors.textPrimary }]}>SYNDICATE</Text>
-            <Text style={[styles.logoSubtitle, { color: colors.textMuted }]}>WORLD ID AUTHENTICATION</Text>
+          <Text style={[styles.brandText, { color: colors.textPrimary }]}>SYNDICATE</Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={[styles.themePill, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}
+          activeOpacity={0.7}
+          hitSlop={12}
+        >
+          {mode === 'dark' ? (
+            <Sun size={15} color={colors.accent} />
+          ) : (
+            <Moon size={15} color={colors.accent} />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Main Content Area - Clean, Focused, Spaced */}
+      <View style={styles.centerContainer}>
+        {/* Futuristic Glowing Biometric Emblem */}
+        <View style={styles.emblemWrapper}>
+          <View style={[styles.glowRing, { backgroundColor: colors.accentSoft }]} />
+          <View style={[styles.emblemCircle, { backgroundColor: colors.surface, borderColor: colors.borderHover }]}>
+            <Fingerprint size={42} color={colors.accent} strokeWidth={1.8} />
           </View>
         </View>
 
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            style={[styles.themeBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={toggleTheme}
-            activeOpacity={0.7}
-          >
-            {mode === 'dark' ? (
-              <Sun size={15} color={colors.accent} />
-            ) : (
-              <Moon size={15} color={colors.accent} />
-            )}
-          </TouchableOpacity>
+        {/* Hero Title & Subtext */}
+        <View style={styles.typographyBlock}>
+          <Text style={[styles.heroHeading, { color: colors.textPrimary }]}>
+            Shielded Copy Trading
+          </Text>
+          <Text style={[styles.heroSubhead, { color: colors.textMuted }]}>
+            Mirror top Ethereum traders with mathematical zero-knowledge privacy.
+          </Text>
+        </View>
 
-          <View style={[styles.statusBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={[styles.pulseDot, { backgroundColor: colors.accent }]} />
-            <Text style={[styles.statusText, { color: colors.textSecondary }]}>SEPOLIA</Text>
+        {/* Minimalist Micro Badges Row */}
+        <View style={styles.pillsRow}>
+          <View style={[styles.microPill, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
+            <Cpu size={12} color={colors.accent} />
+            <Text style={[styles.microPillText, { color: colors.textSecondary }]}>zk-SNARK</Text>
+          </View>
+
+          <View style={[styles.microPill, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
+            <UserCheck size={12} color={colors.accent} />
+            <Text style={[styles.microPillText, { color: colors.textSecondary }]}>1 Human = 1 Seat</Text>
+          </View>
+
+          <View style={[styles.microPill, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
+            <Lock size={11} color={colors.accent} />
+            <Text style={[styles.microPillText, { color: colors.textSecondary }]}>Non-Custodial</Text>
           </View>
         </View>
       </View>
 
-      {/* Hero Section */}
-      <View style={styles.heroSection}>
-        <View style={[styles.heroTag, { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder }]}>
-          <Cpu size={12} color={colors.accent} />
-          <Text style={[styles.heroTagText, { color: colors.accent }]}>PRIVATE FOLLOWER PORTAL</Text>
-        </View>
-
-        <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>
-          Shielded Copy Trading for{' '}
-          <Text style={{ color: colors.accent }}>Anonymous Capital</Text>
-        </Text>
-
-        <Text style={[styles.heroDesc, { color: colors.textMuted }]}>
-          Verify your humanness with World ID. Copy top Ethereum traders from a Railgun shielded
-          pool with zero counterparty risk and complete identity isolation.
-        </Text>
-      </View>
-
-      {/* Render Backend Connection Status */}
-      <BackendStatusCard />
-
-      {/* Primary Verification Card */}
-      <View style={[styles.authCard, { backgroundColor: colors.card, borderColor: colors.borderHover }]}>
-        <Text style={[styles.authCardTitle, { color: colors.textPrimary }]}>Prove Humanness to Enter</Text>
-        <Text style={[styles.authCardSubtitle, { color: colors.textMuted }]}>
-          Zero KYC. Authenticate via your World ID Orb or Device credential to access the follower
-          desk.
-        </Text>
+      {/* Action Zone (Thumb Area) */}
+      <View style={styles.bottomActionZone}>
+        {/* Optional Backend Status (Commented out per request) */}
+        {/* <BackendStatusCard /> */}
 
         {notice && (
-          <View style={[styles.noticeBox, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
+          <View style={[styles.noticePill, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
             <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={[styles.noticeText, { color: colors.accent }]}>{notice}</Text>
+            <Text style={[styles.noticeLabel, { color: colors.accent }]}>{notice}</Text>
           </View>
         )}
 
-        {/* Primary World App Deep Link CTA (52px Touch Target) */}
+        {/* Primary CTA Button: 56px Height, High Contrast */}
         <TouchableOpacity
-          style={[styles.worldIdBtn, { backgroundColor: colors.accent }]}
+          style={[styles.primaryCta, { backgroundColor: colors.accent }]}
           onPress={handleWorldAppDeepLink}
           disabled={isVerifying || isLoading}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
           <Fingerprint size={20} color={colors.textInverse} strokeWidth={2.4} />
-          <Text style={[styles.worldIdBtnText, { color: colors.textInverse }]}>
-            {isVerifying ? 'Verifying with World ID...' : 'Verify with World ID'}
+          <Text style={[styles.primaryCtaText, { color: colors.textInverse }]}>
+            {isVerifying ? 'Connecting...' : 'Verify with World ID'}
           </Text>
           <ArrowRight size={18} color={colors.textInverse} strokeWidth={2.4} />
         </TouchableOpacity>
 
-        {/* Instant Sandbox Verify */}
+        {/* Clean, Subtle Demo Sandbox Button */}
         <TouchableOpacity
-          style={[styles.sandboxBtn, { backgroundColor: colors.surfaceSubtle, borderColor: colors.borderHover }]}
+          style={styles.sandboxLink}
           onPress={handleSandboxVerify}
           disabled={isVerifying || isLoading}
-          activeOpacity={0.8}
+          activeOpacity={0.6}
         >
-          <Sparkles size={15} color={colors.accent} />
-          <Text style={[styles.sandboxBtnText, { color: colors.textSecondary }]}>
-            Instant ZK Sandbox Verify (Demo / Testing)
+          <Sparkles size={14} color={colors.textMuted} />
+          <Text style={[styles.sandboxLinkText, { color: colors.textMuted }]}>
+            Quick Demo Sandbox
           </Text>
         </TouchableOpacity>
 
-        <View style={styles.secureElementRow}>
-          <Lock size={12} color={colors.textMuted} />
-          <Text style={[styles.secureElementText, { color: colors.textMuted }]}>
-            Enclave-backed • No biometric data transmitted
-          </Text>
-        </View>
-      </View>
-
-      {/* Guarantees Grid */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>MATHEMATICAL GUARANTEES</Text>
-      <View style={styles.guaranteesGrid}>
-        {guarantees.map((item, idx) => {
-          const Icon = item.icon
-          return (
-            <View
-              key={idx}
-              style={[styles.guaranteeCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-            >
-              <View style={styles.cardHeader}>
-                <View style={[styles.iconCircle, { backgroundColor: colors.accentSoft }]}>
-                  <Icon size={16} color={colors.accent} />
-                </View>
-                <View style={[styles.tagPill, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
-                  <Text style={[styles.tagText, { color: colors.accent }]}>{item.tag}</Text>
-                </View>
-              </View>
-              <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>{item.title}</Text>
-              <Text style={[styles.cardDesc, { color: colors.textMuted }]}>{item.desc}</Text>
-            </View>
-          )
-        })}
-      </View>
-
-      {/* Comparison Table */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>TRADITIONAL VS WORLD ID</Text>
-      <View style={[styles.comparisonTable, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        {comparisons.map((c, i) => (
-          <View
-            key={i}
-            style={[
-              styles.comparisonRow,
-              { borderBottomColor: colors.borderSubtle },
-              i === comparisons.length - 1 && { borderBottomWidth: 0 },
-            ]}
-          >
-            <Text style={[styles.compFeature, { color: colors.textSecondary }]}>{c.feature}</Text>
-            <View style={styles.compValues}>
-              <Text style={[styles.compTraditional, { color: colors.textMuted }]}>{c.traditional}</Text>
-              <View style={styles.compSyndicateRow}>
-                <CheckCircle2 size={13} color={colors.accent} strokeWidth={2.4} />
-                <Text style={[styles.compSyndicate, { color: colors.accent }]}>{c.syndicate}</Text>
-              </View>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: colors.textMuted }]}>
-          Syndicate Protocol • EthGlobal Mumbai POC
+        {/* Bottom Security Note */}
+        <Text style={[styles.disclaimerText, { color: colors.textMuted }]}>
+          Zero KYC • Private keys remain in your device enclave
         </Text>
       </View>
-    </ScrollView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
+    paddingHorizontal: 24,
+    justifyContent: 'space-between',
   },
-  contentContainer: {
-    padding: 16,
-    paddingBottom: 48,
-  },
-  header: {
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
-    paddingTop: Platform.OS === 'ios' ? 8 : 4,
+    paddingVertical: 12,
   },
-  logoRow: {
+  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  logoBox: {
-    width: 38,
-    height: 38,
+  brandIcon: {
+    width: 32,
+    height: 32,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 1,
+  brandText: {
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 1.5,
   },
-  logoSubtitle: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  themeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  themePill: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statusBadge: {
-    flexDirection: 'row',
+  centerContainer: {
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 9999,
-    borderWidth: 1,
+    justifyContent: 'center',
+    paddingVertical: 20,
   },
-  pulseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  heroSection: {
-    marginBottom: 20,
-  },
-  heroTag: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
+  emblemWrapper: {
+    position: 'relative',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 9999,
+    justifyContent: 'center',
+    marginBottom: 32,
+  },
+  glowRing: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+  },
+  emblemCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  typographyBlock: {
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 16,
+  },
+  heroHeading: {
+    fontSize: 28,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -0.5,
     marginBottom: 10,
   },
-  heroTagText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+  heroSubhead: {
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    maxWidth: 290,
   },
-  heroTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    lineHeight: 32,
-    marginBottom: 8,
+  pillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
   },
-  heroDesc: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  authCard: {
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    marginBottom: 24,
-  },
-  authCardTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  authCardSubtitle: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 16,
-  },
-  noticeBox: {
+  microPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    padding: 10,
-    borderRadius: 10,
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 9999,
     borderWidth: 1,
-    marginBottom: 12,
   },
-  noticeText: {
+  microPillText: {
     fontSize: 11,
     fontWeight: '600',
-    flex: 1,
   },
-  worldIdBtn: {
-    height: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 14,
-    gap: 10,
-    marginBottom: 10,
-  },
-  worldIdBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  sandboxBtn: {
-    height: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: 12,
-    gap: 8,
-    marginBottom: 14,
-  },
-  sandboxBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  secureElementRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  secureElementText: {
-    fontSize: 11,
-  },
-  sectionHeader: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    marginBottom: 12,
-  },
-  guaranteesGrid: {
+  bottomActionZone: {
     gap: 12,
-    marginBottom: 24,
+    alignItems: 'center',
+    width: '100%',
   },
-  guaranteeCard: {
-    borderRadius: 14,
-    padding: 14,
+  noticePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 9999,
     borderWidth: 1,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+  noticeLabel: {
+    fontSize: 11,
+    fontWeight: '600',
   },
-  iconCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+  primaryCta: {
+    width: '100%',
+    height: 56,
+    borderRadius: 16,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
   },
-  tagPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  tagText: {
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  cardDesc: {
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  comparisonTable: {
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 16,
-    marginBottom: 24,
-  },
-  comparisonRow: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-  },
-  compFeature: {
-    fontSize: 11,
+  primaryCtaText: {
+    fontSize: 16,
     fontWeight: '800',
-    marginBottom: 4,
+    letterSpacing: 0.3,
   },
-  compValues: {
-    gap: 2,
-  },
-  compTraditional: {
-    fontSize: 10,
-    textDecorationLine: 'line-through',
-  },
-  compSyndicateRow: {
+  sandboxLink: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    marginTop: 2,
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
   },
-  compSyndicate: {
+  sandboxLinkText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  disclaimerText: {
     fontSize: 11,
-    fontWeight: '700',
-  },
-  footer: {
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  footerText: {
-    fontSize: 10,
+    marginTop: 4,
+    textAlign: 'center',
   },
 })

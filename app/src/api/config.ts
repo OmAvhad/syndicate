@@ -26,3 +26,4 @@ export async function setBackendUrl(url: string): Promise<void> {
 export function getCurrentBackendUrl(): string {
   return currentBackendUrl
 }
+
