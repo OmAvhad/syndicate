@@ -1,0 +1,135 @@
+# 🌍 WorldAuth — World ID Authentication App
+
+A minimal, privacy-preserving authentication app powered by **World ID** zero-knowledge proofs. No passwords, no personal data — just cryptographic proof of humanity.
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React 18 + Vite + TypeScript |
+| Styling | Tailwind CSS + shadcn-compatible components |
+| Auth SDK | `@worldcoin/idkit` |
+| Backend | Node.js + Express (ESM) |
+| Database | MongoDB Atlas (Mongoose) |
+| Auth Tokens | JWT (7-day expiry) |
+
+## Project Structure
+
+```
+world-id-auth/
+├── .env                        # Root env (MongoDB, APP_ID, RP_ID, JWT_SECRET)
+├── backend/
+│   └── src/
+│       ├── index.js            # Express server :3001
+│       ├── db.js               # MongoDB connection
+│       ├── models/User.js      # User schema (nullifierHash as ID)
+│       ├── middleware/auth.js  # JWT middleware
+│       └── routes/
+│           ├── auth.js         # POST /api/auth/verify
+│           └── user.js         # GET/PUT /api/user/profile, GET /api/user/stats
+└── frontend/
+    └── src/
+        ├── pages/
+        │   ├── LandingPage.tsx  # IDKit widget, animated hero
+        │   ├── Dashboard.tsx    # Stats, nullifier hash display
+        │   └── ProfilePage.tsx  # Edit display name, username, bio
+        ├── components/
+        │   ├── Navbar.tsx
+        │   ├── WorldIDButton.tsx
+        │   └── ui/              # Button, Card, Input, Badge, Textarea
+        ├── context/AuthContext.tsx
+        └── lib/
+            ├── api.ts           # Axios client with JWT interceptor
+            └── utils.ts         # cn(), formatDate(), truncateHash()
+```
+
+## Running Locally
+
+### 1. Install dependencies
+
+```bash
+# Backend
+cd backend && npm install
+
+# Frontend
+cd ../frontend && npm install
+```
+
+### 2. Start the backend
+
+```bash
+cd backend && npm run dev
+# → http://localhost:3001
+```
+
+### 3. Start the frontend
+
+```bash
+cd frontend && npm run dev
+# → http://localhost:5173
+```
+
+## Authentication Flow
+
+```
+User clicks "Verify with World ID"
+        ↓
+IDKitWidget opens (World ID app scan)
+        ↓
+handleVerify(proof) → POST /api/auth/verify
+        ↓
+Backend calls developer.worldcoin.org/api/v2/verify/{APP_ID}
+        ↓
+Proof verified → upsert User in MongoDB → return JWT
+        ↓
+onSuccess() → store token in localStorage → redirect to Dashboard
+```
+
+## API Endpoints
+
+### Auth
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/verify` | Verify World ID proof, return JWT + user |
+
+### User (JWT required)
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/user/profile` | Get current user profile |
+| `PUT` | `/api/user/profile` | Update displayName, username, bio |
+| `GET` | `/api/user/stats` | Get login stats |
+
+## Environment Variables
+
+### Root `.env`
+```env
+MONGODB_URI=mongodb+srv://...
+APP_ID=app_...
+RP_ID=rp_...
+SIGNER_ADDRESS=0x...
+JWT_SECRET=your-secret
+```
+
+### `frontend/.env`
+```env
+VITE_APP_ID=app_...
+VITE_RP_ID=rp_...
+VITE_API_URL=http://localhost:3001
+```
+
+## User Model
+
+```js
+{
+  nullifierHash: String,    // World ID identifier (unique, app-scoped)
+  username: String,         // Optional, user-set
+  displayName: String,      // Optional, user-set
+  bio: String,              // Optional
+  avatarUrl: String,        // Optional
+  verificationLevel: String, // 'orb' | 'device'
+  loginCount: Number,       // Incremented each login
+  createdAt: Date,
+  lastLogin: Date,
+}
+```
+
