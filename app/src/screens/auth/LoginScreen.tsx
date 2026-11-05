@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
+import { BackendStatusCard } from '../../components/BackendStatusCard'
 
 export function LoginScreen() {
   const { simulateSandboxLogin, isLoading } = useAuth()
@@ -167,6 +168,9 @@ export function LoginScreen() {
           pool with zero counterparty risk and complete identity isolation.
         </Text>
       </View>
+
+      {/* Render Backend Connection Status */}
+      <BackendStatusCard />
 
       {/* Primary Verification Card */}
       <View style={[styles.authCard, { backgroundColor: colors.card, borderColor: colors.borderHover }]}>

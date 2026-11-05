@@ -16,6 +16,7 @@ import {
 } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
+import { BackendStatusCard } from '../../components/BackendStatusCard'
 
 export function ProfileScreen() {
   const { user, logout } = useAuth()
@@ -68,6 +69,10 @@ export function ProfileScreen() {
           <Text style={[styles.toastText, { color: colors.accent }]}>{copiedNotice}</Text>
         </View>
       )}
+
+      {/* Backend Connection Diagnostics */}
+      <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>LIVE BACKEND SERVICE</Text>
+      <BackendStatusCard />
 
       {/* Theme / Appearance Toggle Card */}
       <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>APPEARANCE THEME</Text>
