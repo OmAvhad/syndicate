@@ -32,7 +32,7 @@ app.use('/api/user', userRoutes);
 app.use('/api', followRoutes);
 
 // Health check
-app.get('/health', (req, res) => {
+app.get(['/health', '/healthz'], (req, res) => {
   res.json({
     status: 'ok',
     environment: process.env.WORLDID_ENV || 'staging',
