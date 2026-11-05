@@ -5,18 +5,21 @@ import { Badge } from '@/components/ui/Badge'
 import { formatDate, truncateHash } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import WalletConnectButton from '@/components/WalletConnectButton'
+import { getBaseScanAddressUrl } from '@/lib/network'
 import {
-  Activity,
+  Users,
+  Compass,
   Calendar,
   ShieldCheck,
-  Clock,
   User,
   Copy,
   Check,
   ExternalLink,
-  Lock,
   Sparkles,
   Wallet,
+  Coins,
+  Database,
+  ArrowRight,
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -42,30 +45,35 @@ export default function Dashboard() {
     }
   }
 
+  // Dashboard Stats with Follower & Following Counts stored in MongoDB
   const stats = [
     {
-      label: 'Session Logins',
-      value: user?.loginCount ?? 1,
-      icon: Activity,
-      sub: 'Verified authentication cycles',
+      label: 'Followers',
+      value: user?.followersCount ?? 0,
+      icon: Users,
+      sub: 'Verified humans following you',
+      highlight: true,
+    },
+    {
+      label: 'Following',
+      value: user?.followingCount ?? 0,
+      icon: Compass,
+      sub: 'Leaders anchored on Arkiv',
+      highlight: true,
+    },
+    {
+      label: 'Your Fee',
+      value: `${user?.subscriptionFee ?? 0.001} ETH`,
+      icon: Coins,
+      sub: 'Per 30-day subscription',
+      highlight: false,
     },
     {
       label: 'Member Since',
       value: formatDate(user?.createdAt),
       icon: Calendar,
-      sub: 'First verified proof timestamp',
-    },
-    {
-      label: 'Proof Level',
-      value: user?.verificationLevel === 'orb' ? 'Orb Verified' : 'Device Verified',
-      icon: ShieldCheck,
-      sub: 'Zero-Knowledge Biometric Proof',
-    },
-    {
-      label: 'Last Authentication',
-      value: formatDate(user?.lastLogin),
-      icon: Clock,
-      sub: 'Cryptographically refreshed',
+      sub: 'First verified proof date',
+      highlight: false,
     },
   ]
 
@@ -98,6 +106,10 @@ export default function Dashboard() {
                       No Wallet Linked
                     </Badge>
                   )}
+                  <Badge variant="info">
+                    <Database className="w-3 h-3 stroke-[2]" />
+                    Arkiv TTL 30d
+                  </Badge>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-text-muted flex-wrap">
                   <span>Nullifier:</span>
@@ -124,16 +136,23 @@ export default function Dashboard() {
 
             <div className="flex items-center gap-3">
               <Link
+                to="/explore"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-all shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
+              >
+                <Compass className="w-3.5 h-3.5 stroke-[2.2]" />
+                Explore Leaders
+              </Link>
+              <Link
                 to="/profile"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs font-semibold text-text-primary transition-colors duration-fast"
               >
                 <User className="w-3.5 h-3.5" />
-                Profile Settings
+                Settings
               </Link>
             </div>
           </div>
 
-          {/* Stats Strip with Tabular Numerals */}
+          {/* Stats Strip with Tabular Numerals (Followers, Following, Fee, Date) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-8 pt-6 border-t border-border">
             {stats.map((s) => {
               const Icon = s.icon
@@ -143,7 +162,11 @@ export default function Dashboard() {
                     <span className="meta-label">{s.label}</span>
                     <Icon className="w-4 h-4 text-accent" />
                   </div>
-                  <div className="text-xl font-bold text-text-primary tnum mb-1">
+                  <div
+                    className={`text-2xl font-bold tnum mb-1 ${
+                      s.highlight ? 'text-accent' : 'text-text-primary'
+                    }`}
+                  >
                     {s.value}
                   </div>
                   <div className="text-[11px] text-text-muted">{s.sub}</div>
@@ -155,8 +178,55 @@ export default function Dashboard() {
 
         {/* Two-Column Information Architecture */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Column 1: Cryptographic Passport & Wallet Module */}
+          {/* Column 1: Explore & Arkiv Follower Ecosystem */}
           <div className="lg:col-span-2 space-y-6">
+
+            {/* Explore Section Promo Card */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Compass className="w-5 h-5 text-accent stroke-[2]" />
+                    <CardTitle>Follower Relationships & Arkiv Network</CardTitle>
+                  </div>
+                  <Badge variant="accent">30-Day TTL Pass</Badge>
+                </div>
+                <CardDescription>
+                  Follow top traders by sending their subscription fee via MetaMask. Relationships are anchored in Arkiv with leader & follower nullifiers, public keys, and transaction hashes.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="p-4 rounded-md bg-surface-raised border border-border space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-bold text-text-primary flex items-center gap-2 mb-1">
+                        <Users className="w-4 h-4 text-accent" />
+                        Explore & Subscribe to Leaders
+                      </div>
+                      <p className="text-xs text-text-muted leading-relaxed max-w-md">
+                        Browse verified World ID traders, review their past track record, and subscribe with a single on-chain transaction.
+                      </p>
+                    </div>
+
+                    <Link
+                      to="/explore"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-accent text-text-inverse font-bold text-xs hover:bg-[#d4f885] transition-colors shrink-0 shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
+                    >
+                      <span>Explore Directory</span>
+                      <ArrowRight className="w-3.5 h-3.5 stroke-[2.2]" />
+                    </Link>
+                  </div>
+
+                  <div className="pt-3 border-t border-border/80 flex items-center justify-between text-xs text-text-muted flex-wrap gap-2">
+                    <span>Your Following Count: <strong className="text-text-primary tnum">{user?.followingCount ?? 0}</strong></span>
+                    <span>•</span>
+                    <span>Your Followers Count: <strong className="text-text-primary tnum">{user?.followersCount ?? 0}</strong></span>
+                    <span>•</span>
+                    <span>Arkiv Status: <span className="text-semantic-success font-medium">Rabdi Testnet Connected</span></span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* MetaMask Wallet Card */}
             <Card>
@@ -166,14 +236,19 @@ export default function Dashboard() {
                     <Wallet className="w-5 h-5 text-accent stroke-[2]" />
                     <CardTitle>MetaMask Public Key</CardTitle>
                   </div>
-                  {user?.walletAddress ? (
-                    <Badge variant="success">Stored in Database</Badge>
-                  ) : (
-                    <Badge variant="warning">Action Needed</Badge>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <Badge variant="muted" className="text-[10px]">
+                      Base Sepolia (84532)
+                    </Badge>
+                    {user?.walletAddress ? (
+                      <Badge variant="success">Stored in Database</Badge>
+                    ) : (
+                      <Badge variant="warning">Action Needed</Badge>
+                    )}
+                  </div>
                 </div>
                 <CardDescription>
-                  Your Ethereum public key is stored in the database to link your World ID to on-chain copy trading, fees, and smart contract execution.
+                  Your Ethereum public key is stored in the database to link your World ID to on-chain copy trading, fee payments on Base Sepolia, and Arkiv relationships.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -188,7 +263,7 @@ export default function Dashboard() {
                           </div>
                           {user.walletConnectedAt && (
                             <div className="text-[11px] text-text-muted mt-1">
-                              Linked on {formatDate(user.walletConnectedAt)}
+                              Linked on {formatDate(user.walletConnectedAt)} • Base Sepolia Testnet
                             </div>
                           )}
                         </div>
@@ -207,12 +282,12 @@ export default function Dashboard() {
                             <span>{copiedWallet ? 'Copied' : 'Copy'}</span>
                           </button>
                           <a
-                            href={`https://etherscan.io/address/${user.walletAddress}`}
+                            href={getBaseScanAddressUrl(user.walletAddress)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-sm bg-surface hover:bg-surface-hover border border-border text-xs text-text-secondary hover:text-text-primary transition-colors"
                           >
-                            <span>Explorer</span>
+                            <span>BaseScan</span>
                             <ExternalLink className="w-3 h-3" />
                           </a>
                         </div>
@@ -230,7 +305,7 @@ export default function Dashboard() {
                         No Ethereum wallet linked yet
                       </div>
                       <p className="text-xs text-text-muted leading-relaxed max-w-md">
-                        Connect MetaMask to save your public key in your account. Only your public address is stored — your private keys remain secure on your device.
+                        Connect MetaMask to save your public key in your account. You need a linked wallet to follow leaders and send subscription fees.
                       </p>
                     </div>
                     <WalletConnectButton variant="compact" />
@@ -269,7 +344,7 @@ export default function Dashboard() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-md bg-surface-raised border border-border gap-2">
                     <div>
                       <div className="text-xs font-semibold text-text-primary">Username Handle</div>
-                      <div className="text-[11px] text-text-muted">Public alias on the platform</div>
+                      <div className="text-[11px] text-text-muted">Public alias across the platform</div>
                     </div>
                     <span className="text-xs font-semibold text-text-primary">
                       {user?.username ? `@${user.username}` : 'Not set (defaults to nullifier)'}
@@ -289,11 +364,11 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            {/* Protocol Integrations & SyndicateCopy */}
+            {/* Protocol Integrations & SyndicateCopy Demo */}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Integrated Syndicate Protocols</CardTitle>
+                  <CardTitle>SyndicateCopy Protocol Demo</CardTitle>
                   <Badge variant="info">SyndicateCopy</Badge>
                 </div>
                 <CardDescription>
@@ -329,9 +404,9 @@ export default function Dashboard() {
           <div className="space-y-6">
             <Card variant="raised">
               <CardHeader>
-                <CardTitle className="text-base">Privacy & Wallet Security</CardTitle>
+                <CardTitle className="text-base">Arkiv & Wallet Integration</CardTitle>
                 <CardDescription>
-                  Strict adherence to non-custodial principles.
+                  Specifications from spec.md active.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -340,8 +415,8 @@ export default function Dashboard() {
                     <Check className="w-2.5 h-2.5 stroke-[2.5]" />
                   </div>
                   <div>
-                    <strong className="text-text-primary block">Public Key Only</strong>
-                    Only your public address is saved. Your private keys never leave MetaMask.
+                    <strong className="text-text-primary block">30-Day TTL in Arkiv</strong>
+                    Follower schema automatically expires 30 days after the payment date.
                   </div>
                 </div>
 
@@ -350,8 +425,8 @@ export default function Dashboard() {
                     <Check className="w-2.5 h-2.5 stroke-[2.5]" />
                   </div>
                   <div>
-                    <strong className="text-text-primary block">Zero PII Stored</strong>
-                    No email addresses, phone numbers, or real names are collected.
+                    <strong className="text-text-primary block">Subscription Fees</strong>
+                    Followers pay via browser MetaMask directly to the leader's wallet.
                   </div>
                 </div>
 
@@ -360,8 +435,8 @@ export default function Dashboard() {
                     <Check className="w-2.5 h-2.5 stroke-[2.5]" />
                   </div>
                   <div>
-                    <strong className="text-text-primary block">Sybil Attack Proof</strong>
-                    World ID ensures one real human per account, preventing multi-wallet spam.
+                    <strong className="text-text-primary block">Dual Count Persistence</strong>
+                    Followers and following counts are updated in MongoDB on follow / unfollow.
                   </div>
                 </div>
               </CardContent>
@@ -369,16 +444,27 @@ export default function Dashboard() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Identity Quick Actions</CardTitle>
+                <CardTitle className="text-base">Quick Navigation</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
+                <Link
+                  to="/explore"
+                  className="flex items-center justify-between p-3 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs text-text-primary transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Compass className="w-4 h-4 text-accent" />
+                    Explore Leaders
+                  </span>
+                  <span className="text-text-muted">&rarr;</span>
+                </Link>
+
                 <Link
                   to="/profile"
                   className="flex items-center justify-between p-3 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs text-text-primary transition-colors"
                 >
                   <span className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-accent" />
-                    Manage Profile & Wallet
+                    <Coins className="w-4 h-4 text-accent" />
+                    Set Subscription Fee
                   </span>
                   <span className="text-text-muted">&rarr;</span>
                 </Link>

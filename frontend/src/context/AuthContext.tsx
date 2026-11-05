@@ -7,6 +7,9 @@ interface User {
   username?: string
   walletAddress?: string | null
   walletConnectedAt?: string | null
+  subscriptionFee?: number
+  followersCount?: number
+  followingCount?: number
   bio?: string
   avatarUrl?: string
   verificationLevel: string

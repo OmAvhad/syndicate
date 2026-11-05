@@ -1,0 +1,658 @@
+import { useState, useEffect, useCallback } from 'react'
+import { useAuth } from '@/context/AuthContext'
+import api from '@/lib/api'
+import { truncateHash } from '@/lib/utils'
+import { Card, CardContent } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import WalletConnectButton from '@/components/WalletConnectButton'
+import { parseEther, toHex } from 'viem'
+import { ensureBaseSepoliaNetwork, getBaseScanTxUrl, getArkivExplorerUrl, getArkivDataExplorerUrl } from '@/lib/network'
+import {
+  Compass,
+  Users,
+  ShieldCheck,
+  Wallet,
+  Check,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Sparkles,
+  Search,
+  UserCheck,
+  UserPlus,
+  Clock,
+  AlertCircle,
+  Database,
+} from 'lucide-react'
+
+interface ExploreUser {
+  id: string
+  nullifierHash: string
+  username: string | null
+  walletAddress: string | null
+  bio: string | null
+  subscriptionFee: number
+  followersCount: number
+  followingCount: number
+  createdAt: string
+  isFollowing: boolean
+  activeUntil: string | null
+  arkivEntityKey: string | null
+}
+
+export default function ExplorePage() {
+  const { user, refreshUser } = useAuth()
+  const [users, setUsers] = useState<ExploreUser[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedLeader, setSelectedLeader] = useState<ExploreUser | null>(null)
+  const [modalOpen, setModalOpen] = useState(false)
+
+  // Follow & Payment Transaction Lifecycle
+  const [txStep, setTxStep] = useState<'review' | 'wallet_request' | 'anchoring_arkiv' | 'success' | 'error'>('review')
+  const [txHash, setTxHash] = useState<string | null>(null)
+  const [arkivEntityKey, setArkivEntityKey] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [unfollowingId, setUnfollowingId] = useState<string | null>(null)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      setLoading(true)
+      const res = await api.get('/api/explore')
+      if (res.data?.success) {
+        setUsers(res.data.users)
+      }
+    } catch (err) {
+      console.error('Failed to fetch explore users:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchUsers()
+  }, [fetchUsers])
+
+  const handleOpenFollowModal = (leader: ExploreUser) => {
+    setSelectedLeader(leader)
+    setTxStep('review')
+    setTxHash(null)
+    setArkivEntityKey(null)
+    setErrorMessage(null)
+    setModalOpen(true)
+  }
+
+  const handleCloseModal = () => {
+    setModalOpen(false)
+    setSelectedLeader(null)
+    setTxStep('review')
+    setErrorMessage(null)
+  }
+
+  // Browser-based MetaMask Wallet Payment and Arkiv Registration
+  const handleExecuteSubscription = async () => {
+    if (!selectedLeader) return
+
+    if (!user?.walletAddress) {
+      setErrorMessage('Please link your MetaMask wallet first from the top navbar or profile.')
+      return
+    }
+
+    if (!selectedLeader.walletAddress) {
+      setErrorMessage('This leader has not linked an Ethereum wallet address to receive fees.')
+      return
+    }
+
+    if (typeof window === 'undefined' || !window.ethereum) {
+      setErrorMessage('MetaMask is not detected. Please install MetaMask to complete subscription payments.')
+      return
+    }
+
+    try {
+      setErrorMessage(null)
+      setTxStep('wallet_request')
+
+      // Ensure MetaMask is connected to Base Sepolia Testnet (Chain ID 84532)
+      await ensureBaseSepoliaNetwork()
+
+      const feeEth = String(selectedLeader.subscriptionFee || '0.001')
+      const valueWei = parseEther(feeEth)
+      const valueHex = toHex(valueWei)
+
+      console.log(`[Payment] Sending ${feeEth} Base Sepolia ETH to ${selectedLeader.walletAddress} from ${user.walletAddress}`)
+
+      // 1. Browser-based transaction via MetaMask
+      const hash = (await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [
+          {
+            from: user.walletAddress,
+            to: selectedLeader.walletAddress,
+            value: valueHex,
+          },
+        ],
+      })) as string
+
+      console.log(`[Payment] Transaction sent! Tx Hash: ${hash}`)
+      setTxHash(hash)
+
+      // 2. Register relationship on Arkiv testnet & save to MongoDB
+      setTxStep('anchoring_arkiv')
+
+      const res = await api.post('/api/follow', {
+        leaderId: selectedLeader.id,
+        transactionId: hash,
+      })
+
+      if (res.data?.success) {
+        setArkivEntityKey(res.data.arkiv?.entityKey || res.data.follow?.arkivEntityKey || '0xarkiv_confirmed')
+        setTxStep('success')
+
+        // Update local state and auth context
+        await refreshUser()
+        await fetchUsers()
+      } else {
+        throw new Error(res.data?.error || 'Failed to register relationship in Arkiv')
+      }
+    } catch (err: unknown) {
+      const e = err as { code?: number; message?: string; response?: { data?: { error?: string } } }
+      console.error('[Payment] Error executing follow:', e)
+      setTxStep('error')
+
+      if (e?.code === 4001) {
+        setErrorMessage('Transaction rejected in MetaMask.')
+      } else {
+        setErrorMessage(e?.response?.data?.error || e?.message || 'Payment or Arkiv registration failed.')
+      }
+    }
+  }
+
+  // Unfollow handler
+  const handleUnfollow = async (leaderId: string) => {
+    try {
+      setUnfollowingId(leaderId)
+      const res = await api.post('/api/unfollow', { leaderId })
+      if (res.data?.success) {
+        await refreshUser()
+        await fetchUsers()
+      }
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string }
+      alert(e?.response?.data?.error || 'Failed to unfollow user.')
+    } finally {
+      setUnfollowingId(null)
+    }
+  }
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedKey(id)
+    setTimeout(() => setCopiedKey(null), 2000)
+  }
+
+  const filteredUsers = users.filter((u) => {
+    const q = searchQuery.toLowerCase()
+    return (
+      (u.username && u.username.toLowerCase().includes(q)) ||
+      u.nullifierHash.toLowerCase().includes(q) ||
+      (u.walletAddress && u.walletAddress.toLowerCase().includes(q)) ||
+      (u.bio && u.bio.toLowerCase().includes(q))
+    )
+  })
+
+  return (
+    <div className="pt-20 pb-16 px-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header Section */}
+        <div className="surface p-6 sm:p-8 mb-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-8 h-8 rounded-sm bg-accent flex items-center justify-center text-text-inverse shadow-sm">
+                  <Compass className="w-4 h-4 stroke-[2.2]" />
+                </span>
+                <span className="meta-label">Decentralized Social Directory</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-text-primary">
+                Explore Verified Leaders & Syndicates
+              </h1>
+              <p className="text-xs sm:text-sm text-text-secondary mt-1 max-w-2xl leading-relaxed">
+                Discover verified humans on World ID. Follow leaders by sending an on-chain subscription fee via MetaMask — 
+                each relationship is cryptographically anchored on <strong className="text-accent">Arkiv</strong> with a 30-day lifespan.
+              </p>
+            </div>
+
+            {/* Quick Wallet Anchor Badge */}
+            <div className="shrink-0 flex flex-col items-start sm:items-end gap-2">
+              <div className="meta-label">Your Transaction Wallet</div>
+              {user?.walletAddress ? (
+                <div className="flex items-center gap-2 p-2 rounded-md bg-surface-raised border border-border">
+                  <Wallet className="w-3.5 h-3.5 text-accent stroke-[2]" />
+                  <span className="mono tnum text-xs text-text-primary">{truncateHash(user.walletAddress, 6)}</span>
+                  <Badge variant="success" className="text-[10px]">Ready</Badge>
+                </div>
+              ) : (
+                <WalletConnectButton variant="compact" />
+              )}
+            </div>
+          </div>
+
+          {/* Search Bar */}
+          <div className="mt-6 pt-6 border-t border-border flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by username, bio, or public key..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-md bg-surface-raised border border-border text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none transition-colors"
+              />
+            </div>
+            <div className="text-xs text-text-muted tnum shrink-0">
+              Showing <strong>{filteredUsers.length}</strong> leaders
+            </div>
+          </div>
+        </div>
+
+        {/* Directory Grid */}
+        {loading ? (
+          <div className="py-20 flex flex-col items-center justify-center gap-3 text-text-muted">
+            <Loader2 className="w-8 h-8 animate-spin text-accent" />
+            <p className="text-xs uppercase tracking-widest font-semibold">Loading Verified Leaders...</p>
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <div className="surface p-12 text-center">
+            <Users className="w-10 h-10 text-text-muted mx-auto mb-3 stroke-[1.5]" />
+            <h3 className="text-base font-bold text-text-primary mb-1">No other users found</h3>
+            <p className="text-xs text-text-muted max-w-sm mx-auto">
+              {searchQuery
+                ? 'No leaders matched your search query. Try another term.'
+                : 'There are no other registered users yet. Test with another simulated identity!'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredUsers.map((leader) => {
+              const leaderIdentifier = leader.username ? `@${leader.username}` : truncateHash(leader.nullifierHash, 8)
+              const avatarLetter = (leader.username || truncateHash(leader.nullifierHash))[0].toUpperCase()
+
+              return (
+                <Card key={leader.id} className="flex flex-col justify-between">
+                  <CardContent className="p-5 flex flex-col h-full justify-between gap-5">
+                    <div>
+                      {/* Top Row: Avatar & Badges */}
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-11 h-11 rounded-md bg-surface-raised border border-border flex items-center justify-center font-bold text-accent shrink-0 text-base">
+                            {avatarLetter}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-sm text-text-primary truncate">
+                              {leaderIdentifier}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[11px] text-text-muted mt-0.5">
+                              <ShieldCheck className="w-3 h-3 text-semantic-success stroke-[2.2]" />
+                              <span>World ID Human</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {leader.isFollowing ? (
+                          <Badge variant="success" className="shrink-0 text-[10px]">
+                            <UserCheck className="w-3 h-3" />
+                            Following
+                          </Badge>
+                        ) : (
+                          <Badge variant="accent" className="shrink-0 text-[10px]">
+                            {leader.subscriptionFee} ETH / 30d
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Bio */}
+                      <p className="text-xs text-text-secondary leading-relaxed mb-4 line-clamp-2">
+                        {leader.bio || 'Verified trader & strategist. Open for syndicate copy relationships.'}
+                      </p>
+
+                      {/* Public Key / Wallet Info */}
+                      <div className="p-2.5 rounded-sm bg-surface-raised border border-border text-xs mb-4 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-semibold text-text-muted">Public Address</span>
+                          {leader.walletAddress ? (
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(leader.walletAddress!, `addr-${leader.id}`)}
+                              className="copy-chip text-[10px] py-0.5 px-1.5"
+                            >
+                              <span className="mono tnum">{truncateHash(leader.walletAddress, 6)}</span>
+                              {copiedKey === `addr-${leader.id}` ? (
+                                <Check className="w-2.5 h-2.5 text-semantic-success" />
+                              ) : (
+                                <Copy className="w-2.5 h-2.5" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-semantic-warning">No wallet linked</span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-semibold text-text-muted">Followers</span>
+                          <span className="mono tnum text-xs font-bold text-text-primary">{leader.followersCount}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="pt-2 border-t border-border">
+                      {leader.isFollowing ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleUnfollow(leader.id)}
+                            disabled={unfollowingId === leader.id}
+                            className="flex-1 py-2 px-3 rounded-md bg-surface-raised hover:bg-semantic-danger/10 border border-border hover:border-semantic-danger/30 text-xs font-semibold text-semantic-danger transition-colors duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {unfollowingId === leader.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : null}
+                            <span>Unfollow</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenFollowModal(leader)}
+                          disabled={!leader.walletAddress}
+                          className="w-full py-2 px-3 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
+                        >
+                          <UserPlus className="w-3.5 h-3.5 stroke-[2.2]" />
+                          <span>Follow ({leader.subscriptionFee} ETH)</span>
+                        </button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        )}
+
+        {/* -----------------------------------------------------------------
+            MODAL: Browser MetaMask Payment & Arkiv TTL Anchor
+            ----------------------------------------------------------------- */}
+        {modalOpen && selectedLeader && (
+          <div className="fixed inset-0 z-50 bg-bg/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+            <div className="surface p-6 sm:p-8 max-w-lg w-full rounded-xl border border-border-strong shadow-[0_20px_50px_rgba(0,0,0,0.7)] animate-slideUp">
+              
+              <div className="flex items-center justify-between border-b border-border pb-4 mb-5">
+                <div className="flex items-center gap-2">
+                  <Database className="w-5 h-5 text-accent stroke-[2]" />
+                  <h3 className="text-base font-bold text-text-primary">
+                    Follow & Anchor on Arkiv
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  className="text-text-muted hover:text-text-primary text-xs p-1"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Review Step */}
+              {txStep === 'review' && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-md bg-surface-raised border border-border space-y-2.5">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-text-muted uppercase tracking-wider font-semibold">Leader</span>
+                      <strong className="text-text-primary">{selectedLeader.username ? `@${selectedLeader.username}` : truncateHash(selectedLeader.nullifierHash)}</strong>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-text-muted uppercase tracking-wider font-semibold">Leader Public Key</span>
+                      <span className="mono tnum text-text-primary">{truncateHash(selectedLeader.walletAddress, 8)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-text-muted uppercase tracking-wider font-semibold">Network</span>
+                      <span className="font-semibold text-text-primary flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+                        Base Sepolia Testnet (84532)
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-text-muted uppercase tracking-wider font-semibold">Subscription Fee</span>
+                      <span className="mono tnum font-bold text-accent text-sm">{selectedLeader.subscriptionFee} ETH</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs pt-2 border-t border-border">
+                      <span className="text-text-muted uppercase tracking-wider font-semibold">Arkiv Time-to-Live (TTL)</span>
+                      <span className="font-semibold text-semantic-success flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" /> 30 Days Valid
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-md bg-accent-soft border border-accent/20 text-xs text-text-primary flex items-start gap-2.5">
+                    <Sparkles className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                    <div>
+                      <strong>Decentralized Arkiv Schema:</strong> Your subscription sends the fee directly to the leader via MetaMask. 
+                      Once confirmed, the relationship is recorded on Arkiv with a 30-day expiration.
+                    </div>
+                  </div>
+
+                  {!user?.walletAddress ? (
+                    <div className="p-3 rounded-md border border-semantic-warning/30 bg-semantic-warning/10 text-xs text-semantic-warning flex items-center justify-between gap-3">
+                      <span>You must link your MetaMask wallet before paying.</span>
+                      <WalletConnectButton variant="compact" />
+                    </div>
+                  ) : null}
+
+                  {errorMessage && (
+                    <div className="p-3 rounded-md border border-semantic-danger/30 bg-semantic-danger/10 text-xs text-semantic-danger flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 pt-3">
+                    <button
+                      type="button"
+                      onClick={handleCloseModal}
+                      className="flex-1 py-2.5 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteSubscription}
+                      disabled={!user?.walletAddress || !selectedLeader.walletAddress}
+                      className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Pay & Follow
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Wallet Request Step */}
+              {txStep === 'wallet_request' && (
+                <div className="py-8 text-center space-y-4">
+                  <Loader2 className="w-10 h-10 animate-spin text-accent mx-auto" />
+                  <div>
+                    <h4 className="text-base font-bold text-text-primary">Confirm in MetaMask</h4>
+                    <p className="text-xs text-text-muted mt-1 max-w-xs mx-auto leading-relaxed">
+                      Please switch to Base Sepolia and confirm the {selectedLeader.subscriptionFee} ETH transaction in your browser wallet extension...
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Anchoring in Arkiv Step */}
+              {txStep === 'anchoring_arkiv' && (
+                <div className="py-8 text-center space-y-4">
+                  <div className="w-10 h-10 rounded-full bg-accent-soft border border-accent flex items-center justify-center text-accent mx-auto">
+                    <Database className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-text-primary">Creating Arkiv Entity</h4>
+                    <p className="text-xs text-text-muted mt-1 max-w-xs mx-auto leading-relaxed">
+                      Transaction confirmed on Base Sepolia! Registering follower schema on Arkiv testnet with 30-day TTL...
+                    </p>
+                  </div>
+                  {txHash && (
+                    <div className="mono text-xs text-text-secondary tnum">
+                      Tx: {truncateHash(txHash, 10)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Success Step */}
+              {txStep === 'success' && (
+                <div className="space-y-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-semantic-success/20 text-semantic-success flex items-center justify-center mx-auto mb-2">
+                    <Check className="w-6 h-6 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-text-primary">Follower Relationship Stored!</h4>
+                    <p className="text-xs text-text-secondary mt-1">
+                      You are now following <strong>{selectedLeader.username ? `@${selectedLeader.username}` : 'Leader'}</strong> for the next 30 days.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-md bg-surface-raised border border-border text-left text-xs space-y-2.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-text-muted">Arkiv Entity Key</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(arkivEntityKey!, 'arkiv-key')}
+                          className="copy-chip text-[10px]"
+                        >
+                          <span className="mono tnum">{truncateHash(arkivEntityKey, 8)}</span>
+                          {copiedKey === 'arkiv-key' ? (
+                            <Check className="w-3 h-3 text-semantic-success" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                        <a
+                          href={getArkivExplorerUrl(arkivEntityKey || undefined)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-text-muted hover:text-accent p-1 transition-colors"
+                          title="Open on Arkiv Rabdi Explorer"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-text-muted">BaseScan Payment Tx</span>
+                      {txHash ? (
+                        <a
+                          href={getBaseScanTxUrl(txHash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mono tnum text-accent hover:underline flex items-center gap-1 font-semibold"
+                        >
+                          <span>{truncateHash(txHash, 8)}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="mono tnum text-text-primary">—</span>
+                      )}
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-text-muted">Arkiv Data Explorer</span>
+                      <a
+                        href={getArkivDataExplorerUrl()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent hover:underline flex items-center gap-1 font-semibold"
+                      >
+                        <span>data.arkiv.network</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-text-muted">Network</span>
+                      <span className="text-text-primary font-medium">Base Sepolia (84532)</span>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-text-muted">Expiration</span>
+                      <span className="text-semantic-success font-semibold">30 Days from today</span>
+                    </div>
+                  </div>
+
+                  {arkivEntityKey?.startsWith('0xarkiv_') && (
+                    <div className="p-3 rounded-md bg-semantic-warning/10 border border-semantic-warning/30 text-xs text-semantic-warning text-left leading-relaxed">
+                      <strong>Pending On-Chain Gas:</strong> The relationship is saved in your database schema. To broadcast directly to the Arkiv Rabdi blockchain so it appears on the block explorer, fund the backend signer (<span className="mono tnum font-semibold">0x1502B0a879C59Aa38bc704eA807f0Eaa22F42Dbf</span>) with free testnet tokens at{' '}
+                      <a
+                        href="https://hub.arkiv.network/faucet"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline font-bold hover:text-accent"
+                      >
+                        hub.arkiv.network/faucet
+                      </a>.
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    className="w-full py-2.5 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {/* Error Step */}
+              {txStep === 'error' && (
+                <div className="space-y-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-semantic-danger/20 text-semantic-danger flex items-center justify-center mx-auto mb-2">
+                    <AlertCircle className="w-6 h-6 stroke-[2]" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-text-primary">Transaction Failed</h4>
+                    <p className="text-xs text-semantic-danger mt-1">
+                      {errorMessage || 'Unable to complete transaction or store in Arkiv.'}
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCloseModal}
+                      className="flex-1 py-2.5 rounded-md bg-surface-raised border border-border text-xs font-semibold text-text-secondary hover:text-text-primary"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExecuteSubscription}
+                      className="flex-1 py-2.5 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885]"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
+
