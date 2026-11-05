@@ -44,6 +44,18 @@ export default {
         pill: "999px",
       },
       fontFamily: {
+        display: [
+          "'Bricolage Grotesque'",
+          "Inter",
+          "-apple-system",
+          "sans-serif",
+        ],
+        body: [
+          "'Atkinson Hyperlegible'",
+          "Inter",
+          "-apple-system",
+          "sans-serif",
+        ],
         sans: [
           "Inter",
           "-apple-system",

@@ -50,6 +50,17 @@ export default function Navbar() {
             Dashboard
           </Link>
 
+          <Link
+            to="/flash-trade"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
+              location.pathname === '/flash-trade'
+                ? 'bg-accent text-text-inverse font-bold shadow-[0_0_12px_rgba(198,243,106,0.25)]'
+                : 'text-accent border border-accent/30 bg-accent-soft hover:bg-accent/20'
+            }`}
+          >
+            ⚡ Flash Trade Demo
+          </Link>
+
           {/* World ID Verified Pill */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-surface border border-border text-xs text-text-secondary">
             <span className="w-1.5 h-1.5 rounded-full bg-semantic-success shadow-[0_0_8px_rgba(121,217,154,0.6)]" />

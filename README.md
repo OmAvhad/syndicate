@@ -1,14 +1,33 @@
-# 🌍 WorldAuth — World ID Authentication App
+# 🌍 SyndicateCopy & WorldAuth — ETHMumbai Hackathon
 
-A minimal, privacy-preserving authentication app powered by **World ID** zero-knowledge proofs. No passwords, no personal data — just cryptographic proof of humanity.
+A privacy-preserving, zero-link copy trading protocol and authentication system powered by **World ID**, **Definitive Flash**, and **Base Sepolia**.
+
+---
+
+## ⚡ Quick Demo: Flash Trade Terminal (No Login Required)
+
+Direct link: **[`http://localhost:5173/flash-trade`](http://localhost:5173/flash-trade)**
+
+For ETHGlobal Mumbai hackathon evaluation, the **Flash Trade Terminal** lets you simulate and execute live onchain trades on Base Sepolia using preloaded burner credentials without needing authentication:
+- **Bracket Orders** (Entry + Take-Profit + Stop-Loss in 1 signed intent)
+- **TWAP Orders** (Anti-frontrunning order slicing for followers)
+- **Live Base Sepolia WETH execution & EIP-712 Intent Signing**
+- **Interactive Price Trigger Engine & Onchain Exit Settlement** (Bull $3,350 & Bear $2,800)
+- **Live JSON Transaction & Protocol Payload Inspector**
+
+📖 **Read the Full Technical Documentation & Architecture FAQ:** [FLASH_TRADE_DOCS.md](./FLASH_TRADE_DOCS.md)
+
+---
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
-| Frontend | React 18 + Vite + TypeScript |
-| Styling | Tailwind CSS + shadcn-compatible components |
-| Auth SDK | `@worldcoin/idkit` |
+| Frontend | React 19 + Vite + TypeScript + viem |
+| Execution Engine | Definitive Flash Advanced Orders (Bracket, TWAP, Limit) |
+| Onchain Network | Base Sepolia Testnet (Chain ID `84532`) |
+| Styling | Tailwind CSS + CRED-inspired Design System |
+| Auth SDK | `@worldcoin/idkit` (World ID v4) |
 | Backend | Node.js + Express (ESM) |
 | Database | MongoDB Atlas (Mongoose) |
 | Auth Tokens | JWT (7-day expiry) |
