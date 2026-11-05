@@ -8,32 +8,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#0B0D0F",
+        bg: "var(--color-bg)",
         surface: {
-          DEFAULT: "#141719",
-          raised: "#1A1E21",
-          hover: "#202629",
+          DEFAULT: "var(--color-surface)",
+          raised: "var(--color-surface-raised)",
+          hover: "var(--color-surface-hover)",
         },
         accent: {
-          DEFAULT: "#C6F36A",
-          muted: "#9FCA4F",
-          soft: "rgba(198, 243, 106, 0.12)",
+          DEFAULT: "var(--color-accent)",
+          muted: "var(--color-accent-muted)",
+          soft: "var(--color-accent-soft)",
         },
         text: {
-          primary: "#F4F5F2",
-          secondary: "#A0A6A8",
-          muted: "#737B7E",
-          inverse: "#0B0D0F",
+          primary: "var(--color-text-primary)",
+          secondary: "var(--color-text-secondary)",
+          muted: "var(--color-text-muted)",
+          inverse: "var(--color-text-inverse)",
         },
         border: {
-          DEFAULT: "#252A2D",
-          strong: "#343B3F",
+          DEFAULT: "var(--color-border)",
+          strong: "var(--color-border-strong)",
         },
         semantic: {
-          success: "#79D99A",
-          warning: "#F0C674",
-          danger: "#F07F7F",
-          info: "#83B9F2",
+          success: "var(--color-success)",
+          warning: "var(--color-warning)",
+          danger: "var(--color-danger)",
+          info: "var(--color-info)",
         },
       },
       borderRadius: {
@@ -54,11 +54,15 @@ export default {
         ],
         mono: [
           "JetBrains Mono",
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
+          "SF Mono",
+          "Fira Code",
           "monospace",
         ],
+      },
+      boxShadow: {
+        glow: "0 0 24px rgba(198, 243, 106, 0.15)",
+        "glow-sm": "0 0 12px rgba(198, 243, 106, 0.10)",
+        card: "0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3)",
       },
       transitionDuration: {
         fast: "160ms",
@@ -67,20 +71,6 @@ export default {
       },
       transitionTimingFunction: {
         standard: "cubic-bezier(0.22, 1, 0.36, 1)",
-      },
-      animation: {
-        fadeIn: "fadeIn 260ms cubic-bezier(0.22, 1, 0.36, 1)",
-        slideUp: "slideUp 320ms cubic-bezier(0.22, 1, 0.36, 1)",
-      },
-      keyframes: {
-        fadeIn: {
-          "0%": { opacity: "0", transform: "translateY(4px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        slideUp: {
-          "0%": { transform: "translateY(16px)", opacity: "0" },
-          "100%": { transform: "translateY(0)", opacity: "1" },
-        },
       },
     },
   },

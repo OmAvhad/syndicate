@@ -12,7 +12,17 @@ const PORT = process.env.PORT || 3001;
 connectDB();
 
 // Middleware
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser requests (mobile apps, curl, etc.) or local dev origins
+    if (!origin || process.env.NODE_ENV !== 'production' || origin.includes('localhost') || origin.includes('render.com')) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 
 // Routes
@@ -30,5 +40,5 @@ app.get('/health', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT} (WorldID env: ${process.env.WORLDID_ENV || 'staging'})`);
+  console.log(`🚀 Backend running on port ${PORT} (WorldID env: ${process.env.WORLDID_ENV || 'staging'})`);
 });

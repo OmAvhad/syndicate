@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: syndicate-backend
+    runtime: node
+    plan: free
+    rootDir: syndicate/backend
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+      - key: APP_ID
+        sync: false
+      - key: RP_ID
+        sync: false
+      - key: SIGNER_ADDRESS
+        sync: false
+      - key: SIGNER_KEY
+        sync: false
+      - key: ACTION
+        value: user-login
+      - key: JWT_SECRET
+        sync: false
+      - key: WORLDID_ENV
+        value: staging
+
