@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
-import { CheckCircle, ArrowLeft, Save, Loader2, Copy, Check, ShieldCheck } from 'lucide-react'
+import WalletConnectButton from '@/components/WalletConnectButton'
+import { CheckCircle, ArrowLeft, Save, Loader2, Copy, Check, ShieldCheck, Wallet } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { truncateHash } from '@/lib/utils'
 
@@ -13,16 +14,15 @@ export default function ProfilePage() {
   const { user, refreshUser } = useAuth()
 
   const [form, setForm] = useState({
-    displayName: user?.displayName || '',
     username: user?.username || '',
     bio: user?.bio || '',
   })
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [copiedNullifier, setCopiedNullifier] = useState(false)
 
-  const avatarLetter = (form.displayName || form.username || truncateHash(user?.nullifierHash) || 'W')[0].toUpperCase()
+  const avatarLetter = (form.username || truncateHash(user?.nullifierHash) || 'W')[0].toUpperCase()
 
   const handleChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -33,8 +33,8 @@ export default function ProfilePage() {
   const handleCopyNullifier = () => {
     if (user?.nullifierHash) {
       navigator.clipboard.writeText(user.nullifierHash)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setCopiedNullifier(true)
+      setTimeout(() => setCopiedNullifier(false), 2000)
     }
   }
 
@@ -56,18 +56,18 @@ export default function ProfilePage() {
 
   return (
     <div className="pt-20 pb-16 px-6">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-2xl mx-auto space-y-6">
         {/* Back Link */}
         <Link
           to="/"
-          className="inline-flex items-center gap-2 text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors duration-fast mb-6"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors duration-fast"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Dashboard
         </Link>
 
         {/* Identity Overview Header */}
-        <div className="surface p-6 sm:p-8 mb-6">
+        <div className="surface p-6 sm:p-8">
           <div className="flex items-center gap-5">
             <div className="relative shrink-0">
               <div className="w-16 h-16 rounded-md bg-surface-raised border border-border flex items-center justify-center text-2xl font-bold text-accent shadow-sm">
@@ -84,7 +84,7 @@ export default function ProfilePage() {
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <h1 className="text-xl font-bold text-text-primary truncate">
-                  {form.displayName || form.username || 'Anonymous Human'}
+                  {form.username ? `@${form.username}` : 'Verified Human'}
                 </h1>
                 <Badge variant="success">Verified Human</Badge>
               </div>
@@ -97,7 +97,7 @@ export default function ProfilePage() {
                   className="copy-chip inline-flex items-center gap-1.5"
                 >
                   <span className="mono tnum">{truncateHash(user?.nullifierHash, 10)}</span>
-                  {copied ? (
+                  {copiedNullifier ? (
                     <Check className="w-3 h-3 text-semantic-success" />
                   ) : (
                     <Copy className="w-3 h-3 text-text-muted" />
@@ -108,39 +108,53 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Profile Settings Form */}
+        {/* MetaMask Wallet Section */}
         <Card>
           <CardHeader>
-            <CardTitle>Profile Information</CardTitle>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wallet className="w-4 h-4 text-accent stroke-[2]" />
+                <CardTitle>Connected MetaMask Wallet</CardTitle>
+              </div>
+              {user?.walletAddress ? (
+                <Badge variant="accent">Linked</Badge>
+              ) : (
+                <Badge variant="muted">Not Connected</Badge>
+              )}
+            </div>
             <CardDescription>
-              This public metadata is associated only with your World ID nullifier hash on this application.
+              Store your Ethereum public key in the database to link your World ID with smart contracts, bracket orders, and fee distribution.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <WalletConnectButton variant="card" />
+          </CardContent>
+        </Card>
+
+        {/* Profile Settings Form (username & bio only, displayName removed) */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Profile Details</CardTitle>
+            <CardDescription>
+              Manage your public alias. Only your username and bio are associated with your account.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSave} className="space-y-4">
-              <Input
-                id="displayName"
-                label="Display Name"
-                placeholder="e.g. Satoshi Nakamoto"
-                value={form.displayName}
-                onChange={(e) => handleChange('displayName', e.target.value)}
-                hint="Your public moniker visible to other verified participants."
-              />
-
               <Input
                 id="username"
                 label="Username"
                 placeholder="e.g. satoshi"
                 value={form.username}
                 onChange={(e) => handleChange('username', e.target.value)}
-                hint="Unique handle across the platform."
+                hint="Your unique public handle on the network."
               />
 
               <Textarea
                 id="bio"
-                label="Short Bio"
+                label="Bio"
                 rows={3}
-                placeholder="Tell others about your trading style or focus..."
+                placeholder="Short bio or trading style description..."
                 value={form.bio}
                 onChange={(e) => handleChange('bio', e.target.value)}
                 hint="Optional description."

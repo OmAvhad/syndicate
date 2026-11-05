@@ -10,9 +10,15 @@ const userSchema = new mongoose.Schema({
     type: String,
     optional: true,
   },
-  displayName: {
+  walletAddress: {
     type: String,
-    optional: true,
+    default: null,
+    trim: true,
+    lowercase: true,
+  },
+  walletConnectedAt: {
+    type: Date,
+    default: null,
   },
   bio: {
     type: String,

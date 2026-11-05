@@ -5,7 +5,8 @@ interface User {
   id: string
   nullifierHash: string
   username?: string
-  displayName?: string
+  walletAddress?: string | null
+  walletConnectedAt?: string | null
   bio?: string
   avatarUrl?: string
   verificationLevel: string

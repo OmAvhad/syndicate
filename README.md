@@ -96,7 +96,9 @@ onSuccess() → store token in localStorage → redirect to Dashboard
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/user/profile` | Get current user profile |
-| `PUT` | `/api/user/profile` | Update displayName, username, bio |
+| `PUT` | `/api/user/profile` | Update username, bio |
+| `POST` | `/api/user/wallet` | Connect & store MetaMask wallet address (public key) |
+| `DELETE` | `/api/user/wallet` | Disconnect wallet address |
 | `GET` | `/api/user/stats` | Get login stats |
 
 ## Environment Variables
@@ -123,7 +125,8 @@ VITE_API_URL=http://localhost:3001
 {
   nullifierHash: String,    // World ID identifier (unique, app-scoped)
   username: String,         // Optional, user-set
-  displayName: String,      // Optional, user-set
+  walletAddress: String,    // Connected MetaMask Ethereum address (public key)
+  walletConnectedAt: Date,  // Timestamp of wallet linking
   bio: String,              // Optional
   avatarUrl: String,        // Optional
   verificationLevel: String, // 'orb' | 'device'

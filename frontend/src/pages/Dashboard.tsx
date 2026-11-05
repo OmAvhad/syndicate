@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/Badge'
 import { formatDate, truncateHash } from '@/lib/utils'
 import { Link } from 'react-router-dom'
+import WalletConnectButton from '@/components/WalletConnectButton'
 import {
   Activity,
   Calendar,
@@ -15,19 +16,29 @@ import {
   ExternalLink,
   Lock,
   Sparkles,
+  Wallet,
 } from 'lucide-react'
 
 export default function Dashboard() {
   const { user } = useAuth()
-  const [copied, setCopied] = useState(false)
+  const [copiedNullifier, setCopiedNullifier] = useState(false)
+  const [copiedWallet, setCopiedWallet] = useState(false)
 
-  const displayName = user?.displayName || user?.username
+  const identifier = user?.username ? `@${user.username}` : 'Verified Human'
 
   const handleCopyNullifier = () => {
     if (user?.nullifierHash) {
       navigator.clipboard.writeText(user.nullifierHash)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setCopiedNullifier(true)
+      setTimeout(() => setCopiedNullifier(false), 2000)
+    }
+  }
+
+  const handleCopyWallet = () => {
+    if (user?.walletAddress) {
+      navigator.clipboard.writeText(user.walletAddress)
+      setCopiedWallet(true)
+      setTimeout(() => setCopiedWallet(false), 2000)
     }
   }
 
@@ -66,22 +77,29 @@ export default function Dashboard() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-md bg-surface-raised border border-border flex items-center justify-center text-xl font-bold text-accent shadow-sm">
-                {(displayName || truncateHash(user?.nullifierHash))[0].toUpperCase()}
+                {(user?.username || truncateHash(user?.nullifierHash))[0].toUpperCase()}
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary">
-                    {displayName || 'Verified Human'}
+                    {identifier}
                   </h1>
                   <Badge variant="success">
                     <ShieldCheck className="w-3 h-3 stroke-[2.2]" />
                     World ID Verified
                   </Badge>
-                  <Badge variant="muted">
-                    1 Human = 1 Seat
-                  </Badge>
+                  {user?.walletAddress ? (
+                    <Badge variant="accent">
+                      <Wallet className="w-3 h-3 stroke-[2]" />
+                      MetaMask Linked
+                    </Badge>
+                  ) : (
+                    <Badge variant="muted">
+                      No Wallet Linked
+                    </Badge>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 text-xs text-text-muted">
+                <div className="flex items-center gap-2 text-xs text-text-muted flex-wrap">
                   <span>Nullifier:</span>
                   <button
                     onClick={handleCopyNullifier}
@@ -89,13 +107,13 @@ export default function Dashboard() {
                     title="Click to copy full nullifier hash"
                   >
                     <span className="mono tnum">{truncateHash(user?.nullifierHash, 12)}</span>
-                    {copied ? (
+                    {copiedNullifier ? (
                       <Check className="w-3 h-3 text-semantic-success" />
                     ) : (
                       <Copy className="w-3 h-3 text-text-muted group-hover:text-accent" />
                     )}
                   </button>
-                  {copied && (
+                  {copiedNullifier && (
                     <span className="text-semantic-success text-[11px] font-semibold animate-fadeIn">
                       Copied!
                     </span>
@@ -137,8 +155,91 @@ export default function Dashboard() {
 
         {/* Two-Column Information Architecture */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Column 1: Cryptographic Passport Details */}
+          {/* Column 1: Cryptographic Passport & Wallet Module */}
           <div className="lg:col-span-2 space-y-6">
+
+            {/* MetaMask Wallet Card */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-accent stroke-[2]" />
+                    <CardTitle>MetaMask Public Key</CardTitle>
+                  </div>
+                  {user?.walletAddress ? (
+                    <Badge variant="success">Stored in Database</Badge>
+                  ) : (
+                    <Badge variant="warning">Action Needed</Badge>
+                  )}
+                </div>
+                <CardDescription>
+                  Your Ethereum public key is stored in the database to link your World ID to on-chain copy trading, fees, and smart contract execution.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {user?.walletAddress ? (
+                  <div className="space-y-3">
+                    <div className="p-4 rounded-md bg-surface-raised border border-border">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="meta-label mb-1">Stored Public Address (0x)</div>
+                          <div className="mono tnum text-sm text-text-primary font-semibold break-all">
+                            {user.walletAddress}
+                          </div>
+                          {user.walletConnectedAt && (
+                            <div className="text-[11px] text-text-muted mt-1">
+                              Linked on {formatDate(user.walletConnectedAt)}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleCopyWallet}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-surface hover:bg-surface-hover border border-border text-xs text-text-secondary hover:text-text-primary transition-colors"
+                          >
+                            {copiedWallet ? (
+                              <Check className="w-3.5 h-3.5 text-semantic-success" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                            <span>{copiedWallet ? 'Copied' : 'Copy'}</span>
+                          </button>
+                          <a
+                            href={`https://etherscan.io/address/${user.walletAddress}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-sm bg-surface hover:bg-surface-hover border border-border text-xs text-text-secondary hover:text-text-primary transition-colors"
+                          >
+                            <span>Explorer</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <WalletConnectButton variant="card" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-5 rounded-md bg-surface-raised border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-bold text-text-primary mb-1">
+                        No Ethereum wallet linked yet
+                      </div>
+                      <p className="text-xs text-text-muted leading-relaxed max-w-md">
+                        Connect MetaMask to save your public key in your account. Only your public address is stored — your private keys remain secure on your device.
+                      </p>
+                    </div>
+                    <WalletConnectButton variant="compact" />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Zero-Knowledge Identity Passport */}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -146,7 +247,7 @@ export default function Dashboard() {
                   <Badge variant="accent">zk-Proof Active</Badge>
                 </div>
                 <CardDescription>
-                  Your public profile displays no real-world identity or wallet addresses. Authentication is verified through cryptographic nullifiers.
+                  Your profile displays no real-world identity. Authentication is anchored via cryptographic nullifiers and unique Proof of Human.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -167,21 +268,21 @@ export default function Dashboard() {
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-md bg-surface-raised border border-border gap-2">
                     <div>
-                      <div className="text-xs font-semibold text-text-primary">Verification Authority</div>
-                      <div className="text-[11px] text-text-muted">World ID Identity Protocol v4.0</div>
+                      <div className="text-xs font-semibold text-text-primary">Username Handle</div>
+                      <div className="text-[11px] text-text-muted">Public alias on the platform</div>
                     </div>
-                    <span className="text-xs font-semibold text-semantic-success flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" /> Biometric Proof Verified
+                    <span className="text-xs font-semibold text-text-primary">
+                      {user?.username ? `@${user.username}` : 'Not set (defaults to nullifier)'}
                     </span>
                   </div>
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-md bg-surface-raised border border-border gap-2">
                     <div>
-                      <div className="text-xs font-semibold text-text-primary">Biometric Data Storage</div>
-                      <div className="text-[11px] text-text-muted">Local device hardware enclave only</div>
+                      <div className="text-xs font-semibold text-text-primary">Verification Authority</div>
+                      <div className="text-[11px] text-text-muted">World ID Identity Protocol v4.0</div>
                     </div>
-                    <span className="text-xs font-semibold text-accent flex items-center gap-1">
-                      <Lock className="w-3.5 h-3.5" /> Non-Custodial
+                    <span className="text-xs font-semibold text-semantic-success flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Biometric Proof Verified
                     </span>
                   </div>
                 </div>
@@ -228,9 +329,9 @@ export default function Dashboard() {
           <div className="space-y-6">
             <Card variant="raised">
               <CardHeader>
-                <CardTitle className="text-base">Privacy Assurance</CardTitle>
+                <CardTitle className="text-base">Privacy & Wallet Security</CardTitle>
                 <CardDescription>
-                  Strict adherence to cryptographic principles.
+                  Strict adherence to non-custodial principles.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -239,8 +340,18 @@ export default function Dashboard() {
                     <Check className="w-2.5 h-2.5 stroke-[2.5]" />
                   </div>
                   <div>
+                    <strong className="text-text-primary block">Public Key Only</strong>
+                    Only your public address is saved. Your private keys never leave MetaMask.
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 text-xs text-text-secondary">
+                  <div className="w-4 h-4 rounded-full bg-semantic-success/20 text-semantic-success flex items-center justify-center shrink-0 mt-0.5">
+                    <Check className="w-2.5 h-2.5 stroke-[2.5]" />
+                  </div>
+                  <div>
                     <strong className="text-text-primary block">Zero PII Stored</strong>
-                    No email addresses, phone numbers, or passwords exist in the database.
+                    No email addresses, phone numbers, or real names are collected.
                   </div>
                 </div>
 
@@ -250,17 +361,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <strong className="text-text-primary block">Sybil Attack Proof</strong>
-                    A user cannot create secondary fake accounts to manipulate ratings.
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-2.5 text-xs text-text-secondary">
-                  <div className="w-4 h-4 rounded-full bg-semantic-success/20 text-semantic-success flex items-center justify-center shrink-0 mt-0.5">
-                    <Check className="w-2.5 h-2.5 stroke-[2.5]" />
-                  </div>
-                  <div>
-                    <strong className="text-text-primary block">Unlinkable Across DApps</strong>
-                    Your actions here cannot be linked to your World ID activity on other sites.
+                    World ID ensures one real human per account, preventing multi-wallet spam.
                   </div>
                 </div>
               </CardContent>
@@ -277,7 +378,7 @@ export default function Dashboard() {
                 >
                   <span className="flex items-center gap-2">
                     <User className="w-4 h-4 text-accent" />
-                    Update Display Profile
+                    Manage Profile & Wallet
                   </span>
                   <span className="text-text-muted">&rarr;</span>
                 </Link>
