@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
   },
   username: {
     type: String,
-    optional: true,
+    default: null,
   },
   walletAddress: {
     type: String,
@@ -20,13 +20,25 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  subscriptionFee: {
+    type: Number,
+    default: 0.001, // Subscription fee in ETH
+  },
+  followersCount: {
+    type: Number,
+    default: 0,
+  },
+  followingCount: {
+    type: Number,
+    default: 0,
+  },
   bio: {
     type: String,
-    optional: true,
+    default: null,
   },
   avatarUrl: {
     type: String,
-    optional: true,
+    default: null,
   },
   createdAt: {
     type: Date,

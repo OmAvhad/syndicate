@@ -4,6 +4,7 @@ import cors from 'cors';
 import connectDB from './db.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
+import followRoutes from './routes/follow.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,6 +19,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api', followRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

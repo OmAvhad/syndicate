@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { truncateHash } from '@/lib/utils'
-import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet } from 'lucide-react'
+import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass } from 'lucide-react'
 
 export default function Navbar() {
   const { user, logout } = useAuth()
@@ -48,6 +48,18 @@ export default function Navbar() {
           >
             <LayoutDashboard className="w-3.5 h-3.5" />
             Dashboard
+          </Link>
+
+          <Link
+            to="/explore"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
+              location.pathname === '/explore'
+                ? 'bg-surface-raised text-text-primary border border-border'
+                : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5" />
+            Explore
           </Link>
 
           {/* World ID Verified Pill */}
@@ -154,6 +166,14 @@ export default function Navbar() {
           >
             <LayoutDashboard className="w-4 h-4 text-accent" />
             Dashboard
+          </Link>
+          <Link
+            to="/explore"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
+          >
+            <Compass className="w-4 h-4 text-accent" />
+            Explore Leaders
           </Link>
           <Link
             to="/profile"

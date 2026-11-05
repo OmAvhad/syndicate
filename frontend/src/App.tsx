@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import ProfilePage from './pages/ProfilePage'
+import ExplorePage from './pages/ExplorePage'
 import Navbar from './components/Navbar'
 
 function AppRoutes() {
@@ -29,6 +30,10 @@ function AppRoutes() {
           <Route
             path="/"
             element={isAuthenticated ? <Dashboard /> : <LandingPage />}
+          />
+          <Route
+            path="/explore"
+            element={isAuthenticated ? <ExplorePage /> : <Navigate to="/" replace />}
           />
           <Route
             path="/profile"

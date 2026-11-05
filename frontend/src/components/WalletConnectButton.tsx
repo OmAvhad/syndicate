@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
+import { getBaseScanAddressUrl } from '@/lib/network'
 import { Wallet, Loader2, Check, Copy, ExternalLink, X, RefreshCw } from 'lucide-react'
 
 // Typing for MetaMask window.ethereum provider
@@ -193,11 +194,11 @@ export default function WalletConnectButton({
                   )}
                 </button>
                 <a
-                  href={`https://etherscan.io/address/${walletAddress}`}
+                  href={getBaseScanAddressUrl(walletAddress)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-text-muted hover:text-accent p-0.5 transition-colors"
-                  title="View on Etherscan"
+                  title="View on BaseScan"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
