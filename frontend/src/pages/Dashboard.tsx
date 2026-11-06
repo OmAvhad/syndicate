@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
+import api from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { formatDate, truncateHash } from '@/lib/utils'
@@ -28,6 +29,18 @@ export default function Dashboard() {
   const { user } = useAuth()
   const [copiedNullifier, setCopiedNullifier] = useState(false)
   const [copiedWallet, setCopiedWallet] = useState(false)
+  const [followingList, setFollowingList] = useState<any[]>([])
+  const [followersList, setFollowersList] = useState<any[]>([])
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/api/following').catch(() => ({ data: { following: [] } })),
+      api.get('/api/followers').catch(() => ({ data: { followers: [] } })),
+    ]).then(([followingRes, followersRes]) => {
+      if (followingRes.data?.success) setFollowingList(followingRes.data.following || [])
+      if (followersRes.data?.success) setFollowersList(followersRes.data.followers || [])
+    })
+  }, [])
 
   const identifier = user?.username ? `@${user.username}` : 'Verified Human'
 
@@ -166,19 +179,89 @@ export default function Dashboard() {
             {stats.map((s) => {
               const Icon = s.icon
               return (
-                <div key={s.label} className="bg-surface-raised border border-border rounded-md p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="meta-label">{s.label}</span>
-                    <Icon className="w-4 h-4 text-accent" />
+                <div key={s.label} className="bg-surface-raised border border-border rounded-md p-4 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="meta-label">{s.label}</span>
+                      <Icon className="w-4 h-4 text-accent" />
+                    </div>
+                    <div
+                      className={`text-2xl font-bold tnum mb-1 ${
+                        s.highlight ? 'text-accent' : 'text-text-primary'
+                      }`}
+                    >
+                      {s.value}
+                    </div>
+                    <div className="text-[11px] text-text-muted">{s.sub}</div>
                   </div>
-                  <div
-                    className={`text-2xl font-bold tnum mb-1 ${
-                      s.highlight ? 'text-accent' : 'text-text-primary'
-                    }`}
-                  >
-                    {s.value}
-                  </div>
-                  <div className="text-[11px] text-text-muted">{s.sub}</div>
+
+                  {/* Followers Card: If count < 3 and > 0, list account numbers directly in same card */}
+                  {s.label === 'Followers' && followersList.length > 0 && followersList.length < 3 && (
+                    <div className="mt-3 pt-2.5 border-t border-border/80 space-y-1.5 animate-fadeIn">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-text-muted flex items-center justify-between">
+                        <span>Account Number(s):</span>
+                        <span className="text-accent">{followersList.length} human</span>
+                      </div>
+                      {followersList.map((f, idx) => {
+                        const addr = f.followerPublicKey || f.followerId?.walletAddress
+                        const handle = f.followerId?.username ? `@${f.followerId.username}` : `Human #${idx + 1}`
+                        return (
+                          <div key={f._id} className="p-1.5 rounded bg-surface border border-border text-[11px] space-y-0.5">
+                            <div className="font-bold text-text-primary text-[10px] truncate">{handle}</div>
+                            {addr ? (
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="mono tnum text-accent font-bold text-[10px] truncate select-all">{truncateHash(addr, 6)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => navigator.clipboard.writeText(addr)}
+                                  className="text-[9px] px-1 py-0.2 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary cursor-pointer border border-border shrink-0"
+                                  title="Copy address"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[9px] text-text-muted">No wallet linked</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Following Card: If count < 3 and > 0, list account numbers directly in same card */}
+                  {s.label === 'Following' && followingList.length > 0 && followingList.length < 3 && (
+                    <div className="mt-3 pt-2.5 border-t border-border/80 space-y-1.5 animate-fadeIn">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-text-muted flex items-center justify-between">
+                        <span>Account Number(s):</span>
+                        <span className="text-accent">{followingList.length} leader</span>
+                      </div>
+                      {followingList.map((f, idx) => {
+                        const addr = f.leaderPublicKey || f.leaderId?.walletAddress
+                        const handle = f.leaderId?.username ? `@${f.leaderId.username}` : `Leader #${idx + 1}`
+                        return (
+                          <div key={f._id} className="p-1.5 rounded bg-surface border border-border text-[11px] space-y-0.5">
+                            <div className="font-bold text-text-primary text-[10px] truncate">{handle}</div>
+                            {addr ? (
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="mono tnum text-accent font-bold text-[10px] truncate select-all">{truncateHash(addr, 6)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => navigator.clipboard.writeText(addr)}
+                                  className="text-[9px] px-1 py-0.2 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary cursor-pointer border border-border shrink-0"
+                                  title="Copy address"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[9px] text-text-muted">No wallet linked</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })}

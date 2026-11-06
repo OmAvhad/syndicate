@@ -100,6 +100,15 @@ export default function LeaderTerminalPage() {
   // Exit trigger state
   const [isExiting, setIsExiting] = useState(false)
   const [exitResult, setExitResult] = useState<OnchainExecutionResult | null>(null)
+  const [terminalFollowers, setTerminalFollowers] = useState<any[]>([])
+
+  useEffect(() => {
+    api.get('/api/followers')
+      .then(res => {
+        if (res.data?.success) setTerminalFollowers(res.data.followers || [])
+      })
+      .catch(() => {})
+  }, [])
 
   // Interactive Live Execution Logs & Audit Trail
   interface TerminalLogItem {
@@ -464,9 +473,23 @@ export default function LeaderTerminalPage() {
                 <span className="w-2 h-2 rounded-full bg-semantic-success animate-pulse" />
                 <span className="text-text-primary font-semibold">ArkDB 10m TTL Active</span>
               </div>
-              <span className="text-[11px] text-text-muted">
-                Followers: <strong className="text-text-primary tnum">{user?.followersCount ?? 0}</strong>
-              </span>
+              <div className="text-[11px] text-text-muted text-right space-y-1">
+                <div>Followers: <strong className="text-text-primary tnum">{terminalFollowers.length || user?.followersCount || 0}</strong></div>
+                {terminalFollowers.length > 0 && terminalFollowers.length < 3 && (
+                  <div className="space-y-0.5 animate-fadeIn">
+                    {terminalFollowers.map((f, i) => {
+                      const addr = f.followerPublicKey || f.followerId?.walletAddress
+                      const handle = f.followerId?.username ? `@${f.followerId.username}` : `Human #${i + 1}`
+                      return (
+                        <div key={f._id} className="text-[10px] mono flex items-center justify-end gap-1.5 bg-surface-raised px-2 py-0.5 rounded border border-border">
+                          <span className="font-bold text-text-primary">{handle}:</span>
+                          <span className="text-accent font-bold">{truncateHash(addr, 6)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

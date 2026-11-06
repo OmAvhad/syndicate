@@ -201,39 +201,109 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Followers / Following Stats in Header (Clickable to switch tabs) */}
-            <div className="flex items-center gap-2 p-1.5 rounded-md bg-surface-raised border border-border self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setActiveTab('followers')}
-                className={`text-center px-3 py-1.5 rounded transition-colors cursor-pointer ${
-                  activeTab === 'followers'
-                    ? 'bg-accent/15 text-accent border border-accent/30'
-                    : 'hover:bg-surface text-text-primary'
-                }`}
-                title="View your followers"
-              >
-                <div className="mono tnum text-base font-bold text-accent">
-                  {followersList.length || user?.followersCount || 0}
+            {/* Followers / Following Stats in Header (In same card with account numbers if < 3) */}
+            <div className="p-3 rounded-md bg-surface-raised border border-border self-start sm:self-auto space-y-2 min-w-[220px]">
+              <div className="flex items-center gap-3 justify-around">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('followers')}
+                  className={`text-center px-3 py-1.5 rounded transition-colors cursor-pointer ${
+                    activeTab === 'followers'
+                      ? 'bg-accent/15 text-accent border border-accent/30'
+                      : 'hover:bg-surface text-text-primary'
+                  }`}
+                  title="View your followers"
+                >
+                  <div className="mono tnum text-base font-bold text-accent">
+                    {followersList.length || user?.followersCount || 0}
+                  </div>
+                  <div className="text-[10px] uppercase font-semibold text-text-muted">Followers</div>
+                </button>
+                <div className="w-px h-6 bg-border" />
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('following')}
+                  className={`text-center px-3 py-1.5 rounded transition-colors cursor-pointer ${
+                    activeTab === 'following'
+                      ? 'bg-accent/15 text-accent border border-accent/30'
+                      : 'hover:bg-surface text-text-primary'
+                  }`}
+                  title="View leaders you follow"
+                >
+                  <div className="mono tnum text-base font-bold text-accent">
+                    {followingList.length || user?.followingCount || 0}
+                  </div>
+                  <div className="text-[10px] uppercase font-semibold text-text-muted">Following</div>
+                </button>
+              </div>
+
+              {/* Inline Follower Account Numbers without needing to click (< 3 accounts) */}
+              {followersList.length > 0 && followersList.length < 3 && (
+                <div className="pt-2 border-t border-border/80 text-[10px] space-y-1 animate-fadeIn">
+                  <div className="font-bold uppercase text-text-muted text-[9px] flex items-center justify-between">
+                    <span>Follower Account(s):</span>
+                    <span className="text-accent">{followersList.length}</span>
+                  </div>
+                  {followersList.map((f, i) => {
+                    const addr = f.followerPublicKey || f.followerId?.walletAddress
+                    const handle = f.followerId?.username ? `@${f.followerId.username}` : `Follower #${i + 1}`
+                    return (
+                      <div key={f._id} className="p-1 rounded bg-surface border border-border space-y-0.5">
+                        <div className="font-bold text-text-primary text-[10px] truncate">{handle}</div>
+                        {addr ? (
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="mono tnum text-accent font-bold truncate select-all">{truncateHash(addr, 6)}</span>
+                            <button
+                              type="button"
+                              onClick={() => navigator.clipboard.writeText(addr)}
+                              className="px-1 py-0.2 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary border border-border shrink-0 cursor-pointer"
+                              title="Copy address"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[9px] text-text-muted">No wallet linked</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-                <div className="text-[10px] uppercase font-semibold text-text-muted">Followers</div>
-              </button>
-              <div className="w-px h-6 bg-border" />
-              <button
-                type="button"
-                onClick={() => setActiveTab('following')}
-                className={`text-center px-3 py-1.5 rounded transition-colors cursor-pointer ${
-                  activeTab === 'following'
-                    ? 'bg-accent/15 text-accent border border-accent/30'
-                    : 'hover:bg-surface text-text-primary'
-                }`}
-                title="View leaders you follow"
-              >
-                <div className="mono tnum text-base font-bold text-accent">
-                  {followingList.length || user?.followingCount || 0}
+              )}
+
+              {/* Inline Following Account Numbers without needing to click (< 3 accounts) */}
+              {followingList.length > 0 && followingList.length < 3 && (
+                <div className="pt-2 border-t border-border/80 text-[10px] space-y-1 animate-fadeIn">
+                  <div className="font-bold uppercase text-text-muted text-[9px] flex items-center justify-between">
+                    <span>Following Account(s):</span>
+                    <span className="text-accent">{followingList.length}</span>
+                  </div>
+                  {followingList.map((f, i) => {
+                    const addr = f.leaderPublicKey || f.leaderId?.walletAddress
+                    const handle = f.leaderId?.username ? `@${f.leaderId.username}` : `Leader #${i + 1}`
+                    return (
+                      <div key={f._id} className="p-1 rounded bg-surface border border-border space-y-0.5">
+                        <div className="font-bold text-text-primary text-[10px] truncate">{handle}</div>
+                        {addr ? (
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="mono tnum text-accent font-bold truncate select-all">{truncateHash(addr, 6)}</span>
+                            <button
+                              type="button"
+                              onClick={() => navigator.clipboard.writeText(addr)}
+                              className="px-1 py-0.2 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary border border-border shrink-0 cursor-pointer"
+                              title="Copy address"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[9px] text-text-muted">No wallet linked</span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-                <div className="text-[10px] uppercase font-semibold text-text-muted">Following</div>
-              </button>
+              )}
             </div>
           </div>
         </div>
