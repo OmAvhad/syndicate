@@ -28,7 +28,7 @@ type EnvironmentType = 'staging' | 'production' | 'sandbox'
 const APP_ID = import.meta.env.VITE_APP_ID as `app_${string}`
 // ACTION is the action name registered in the Developer Portal (e.g. "login")
 // RP_ID (rp_cfb93...) is the Relying Party ID — it lives in rp_context, NOT in action
-const ACTION = import.meta.env.VITE_ACTION || 'login'
+const ACTION = import.meta.env.VITE_ACTION || 'user-login'
 const DEFAULT_ENV = (import.meta.env.VITE_WORLDID_ENV || 'staging') as EnvironmentType
 
 export default function WorldIDButton({ onVerified, className, size = 'lg' }: WorldIDButtonProps) {
