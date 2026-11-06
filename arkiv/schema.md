@@ -61,3 +61,32 @@ export const TradePromiseSchema = defineSchema('trade_promises', {
 });
 ```
 
+---
+
+## 4. Trade Result Claims Schema (`trade_result_claims`)
+
+* **Purpose:** A verifiable, post-trade result attestation linking a closed trade's actual onchain entry and exit receipts, realized P/L, and burner address back to the original pre-trade `trade_promises` entity.
+* **TTL:** `ExpirationTime.fromDays(30)`
+
+```typescript
+import { defineSchema, str } from '@arkiv-network/sdk/schema';
+
+export const TradeClaimSchema = defineSchema('trade_result_claims', {
+  tradeId:              str().indexed(),   // MongoDB internal trade ID
+  userId:               str().indexed(),   // Trader or follower user ID
+  role:                 str().indexed(),   // 'leader' or 'follower'
+  promiseId:            str().indexed(),   // Original promise identifier
+  promiseEntityKey:     str().indexed(),   // Arkiv entity key of the pre-trade promise
+  payloadHash:          str().indexed(),   // Pre-trade HMAC commitment hash
+  burnerAddress:        str().indexed(),   // Burner wallet that executed the trade
+  entryTxHash:          str().indexed(),   // Leg 1 entry transaction hash (USDC transfer)
+  entryDeliveryTxHash:  str().indexed(),   // Leg 2 entry transaction hash (WETH delivery)
+  exitReturnTxHash:     str().indexed(),   // Leg 1 exit transaction hash (WETH return)
+  exitPayoutTxHash:     str().indexed(),   // Leg 2 exit transaction hash (USDC payout)
+  entryUsdcUnits:       str().indexed(),   // Capital spent in USDC atomic units
+  exitUsdcUnits:        str().indexed(),   // Capital returned in USDC atomic units
+  realizedPnlUnits:     str().indexed(),   // Realized net P/L in USDC atomic units
+  claimedAt:            str().indexed(),   // ISO 8601 claim timestamp
+});
+```
+

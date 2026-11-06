@@ -19,9 +19,9 @@ SyndicateCopy introduces **Zero-Link Burner Trading** and **Sealed Signals**:
 
 ---
 
-## 2. Hardcoded Testnet Credentials (Ethereum Sepolia L1)
+## 2. Hardcoded Testnet Credentials (Ethereum Sepolia & Arkiv Rabdi)
 
-For testing and hackathon judging, the `/flash-trade` terminal preloads verified Ethereum Sepolia testnet accounts derived from the project mnemonic, funded and aligned with the Kohaku / Railgun privacy engine:
+For testing and hackathon judging, the application preloads verified Ethereum Sepolia and Arkiv Rabdi testnet accounts derived from the project mnemonic, funded and aligned with the Kohaku / Railgun privacy engine:
 
 ```text
 Mnemonic: "honey gadget trigger smooth menu okay luxury walk refuse behind cushion color"
@@ -33,11 +33,13 @@ Mnemonic: "honey gadget trigger smooth menu okay luxury walk refuse behind cushi
 - **Private Key:** `0xd8b5ae7e766afb0c8acaf43b2a973083ab128e595da9be91ca1f66fac72a0c55`
 - **Network:** Ethereum Sepolia Testnet (L1)
 
-### Account 1 — Burner Wallet (Index 1) — *Default Active Trader*
-- **Role:** Anonymous Single-Use Trade Execution Burner (Funded via Kohaku / Railgun)
+### Account 1 — Leader Burner Wallet (Index 1) — *Primary Leader Execution*
+- **Role:** Anonymous Single-Use Trade Execution Burner for Leaders (Funded via Kohaku / Railgun)
 - **Address:** [`0x2e5Bade58a9D3C939C45269AfC5b0e26b66b57F9`](https://sepolia.etherscan.io/address/0x2e5Bade58a9D3C939C45269AfC5b0e26b66b57F9)
 - **Private Key:** `0x188fe782457952a2218796912dafea24d0554d167afd17796d576faa77633875`
 - **Network:** Ethereum Sepolia Testnet (L1)
+- **Current Live Balances:** ~`0.0075 ETH`, `20.17 USDC`, `0.000 WETH`
+- **Export Symbol in Code:** [`LEADER_BURNER_ADDRESS`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L24), [`LEADER_BURNER_KEY`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L25)
 
 ### Account 2 — FlashTradePool Vault (Index 2) — *Settlement & Liquidity Vault*
 - **Role:** Dedicated Settlement Vault & Liquidity Counterparty Pool
@@ -45,16 +47,176 @@ Mnemonic: "honey gadget trigger smooth menu okay luxury walk refuse behind cushi
 - **Private Key:** `0x5299ad8d435a01383b00d555c4414186ace307e42f42991ba08a83505cb3ed6b`
 - **Purpose:** Receives trade entry capital ($X$), holds escrow during open positions, and executes automated payout transfers ($X + Y$) upon Take-Profit / Bull run exits while retaining the 30 bps protocol fee.
 - **Network:** Ethereum Sepolia Testnet (L1)
+- **Current Live Balances:** ~`0.019 WETH`, ~`38.83 USDC`
+- **Export Symbol in Code:** [`FLASH_TRADE_POOL_ADDRESS`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L20), [`FLASH_TRADE_POOL_KEY`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L21)
+
+### Account 3 — Follower Dedicated Burner Wallet — *Isolated Copy Execution*
+- **Role:** Dedicated Anonymous Copy Execution Burner for Followers (Isolated from Leader funds)
+- **Address:** [`0x915E5004F52F934717D8938638A991470FE03AF6`](https://sepolia.etherscan.io/address/0x915E5004F52F934717D8938638A991470FE03AF6)
+- **Private Key:** `0xec21abb2f5c1838d80d40ecc8608e4c88ecf5bfd824f6eee35dc2a450e224fec`
+- **Network:** Ethereum Sepolia Testnet (L1)
+- **Funded Balances:** `0.004 Sepolia ETH` (tx [`0x09d813...`](https://sepolia.etherscan.io/tx/0x09d813b0e4bfffa268fc38ab821be73ab4e9736b69ddb1ef6ee4c857f59d3b23)), `15.00 USDC` (tx [`0xffbf9d...`](https://sepolia.etherscan.io/tx/0xffbf9d1623d35386663fba1b99a8c3eec63bf2314664d3cdcfd0ef1a8be911e0)), `0.000 WETH`
+- **Why a Separate Follower Burner?**  
+  In earlier testing, both the leader and follower shared Account 1 (`0x2e5B...`). This created cross-contamination where executing a follower copy deducted capital from the leader's balance, and exiting one position left the other position open. By partitioning into **Dedicated Leader** and **Dedicated Follower** burners, both parties have completely independent balances, individual WETH positions, and can trigger onchain Bull/Bear exits simultaneously without race conditions.
+- **Export Symbol in Code:** [`FOLLOWER_BURNER_ADDRESS`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L28), [`FOLLOWER_BURNER_KEY`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L29)
+
+### Account 4 — Arkiv Relayer & World ID Signer Wallet
+- **Role:** Gas relayer for Arkiv onchain operations & EIP-712 World ID v4 Auth Relayer
+- **Address:** [`0x0962cC66c69426C32574447cF50fe9664fE94451`](https://rabdi.explorer.arkiv.network/address/0x0962cC66c69426C32574447cF50fe9664fE94451)
+- **Derived From:** `SIGNER_KEY` (`0xd3109bfed18f988a34ae8b8f379c48b6083d5fa6a1aff9fc58e2deb06044fd59`) in `backend/.env`
+- **Network:** Arkiv Rabdi Testnet (Chain ID: `7794095`)
+- **Balance:** **`10.0 tGLM`** (Funded and verified live on Rabdi testnet)
+- **Functions:**
+  1. Signs IDKit v4 `rp_context` payload for verifying human World ID credentials.
+  2. Submits onchain `createEntity` transactions sealing 30-day Trade Promises (`trade_promises`), 30-day Follower Relationships (`follower_relationships`), and 10-minute Trade Signals (`trade_signals`) directly onto the Arkiv Rabdi testnet.
 
 ---
 
-## 3. Network & Onchain Infrastructure
+## 3. End-to-End Protocol Lifecycle: Leader Promise, Two-Leg Execution, Signals & Follower Copy
+
+The following sequence diagram illustrates the entire end-to-end journey from leader order creation to follower copy and real onchain exit settlement:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Leader as Leader Trader (Burner: 0x2e5B...57F9)
+    participant UI_L as Leader Terminal (/leader-terminal)
+    participant Relayer as Syndicate Relayer & Arkiv Node
+    participant ArkivNet as Arkiv Rabdi Testnet (0x0962...4451)
+    participant Sepolia as Ethereum Sepolia & Vault (0xA360...05E8)
+    participant WS as WebSocket Relay Service
+    participant UI_F as Follower Desk (/dashboard)
+    actor Follower as Follower Trader (Burner: 0x915E...3AF6)
+
+    Note over Leader,UI_L: Step 1: Sequential Trade Promise
+    Leader->>UI_L: Input Order: BUY ETH/USDC @ $3000 (Capital $3.00, TP $3350, SL $2800)
+    UI_L->>Relayer: POST /api/trades/promise (HMAC tradeData + tradeIndex)
+    Relayer->>ArkivNet: storeTradePromiseInArkiv (Schema: trade_promises, 30d retention)
+    ArkivNet-->>Relayer: Sealed Entity Key (0x3d15...3621) + Tx Hash
+    Relayer-->>UI_L: Return promiseId & Arkiv Explorer URL
+
+    Note over Leader,Sepolia: Step 2: Atomic Two-Leg Execution
+    UI_L->>Sepolia: Leg 1: Leader Burner transfers $3.00 USDC to FlashTradePool Vault
+    Sepolia-->>UI_L: Mined (Etherscan Leg 1)
+    UI_L->>Sepolia: Leg 2: Vault transfers 0.001 WETH to Leader Burner
+    Sepolia-->>UI_L: Mined (Etherscan Leg 2)
+    Note over Leader,Sepolia: Leader holds 0.001 WETH. Balance: 17.17 USDC + 0.001 WETH
+
+    Note over Relayer,WS: Step 3: Signal Encryption & 10m TTL
+    UI_L->>Relayer: POST /api/trades/signal (Order fill payload)
+    Relayer->>Relayer: Query active followers & encrypt payload with follower public key (AES-256-GCM)
+    Relayer->>ArkivNet: storeTradeSignalInArkiv (Schema: trade_signals, 10-min TTL)
+    Relayer->>WS: Broadcast trade_signal event to active human followers
+
+    Note over UI_F,Follower: Step 4: Real-Time Follower Notification & Copy
+    WS-->>UI_F: Real-Time Signal Banner pops up: "New Signal: BUY ETH/USDC @ $3,000"
+    Follower->>UI_F: Click "Review & Copy" -> Opens CopyTradeModal
+    Follower->>UI_F: Enter Custom Allocation (e.g. $1.50 USDC -> 0.0005 WETH)
+    UI_F->>Sepolia: Execute Copy via Follower Burner (0x915E...3AF6)
+    UI_F->>Sepolia: Leg 1: Follower Burner transfers $1.50 USDC to Vault
+    UI_F->>Sepolia: Leg 2: Vault transfers 0.0005 WETH to Follower Burner
+    Sepolia-->>UI_F: Copy Mined Onchain! Follower position active.
+
+    Note over Leader,Follower: Step 5: Market Exit Settlement (Bull Move @ $3,350)
+    Leader->>UI_L: Click "🚀 Bull Move ($3,350)" -> Take-Profit Hit (+11.30% Net)
+    UI_L->>Sepolia: Reverse Leg 1: Leader Burner returns 0.001 WETH to Vault
+    UI_L->>Sepolia: Reverse Leg 2: Vault transfers $3.34 USDC (Principal + Net Profit) to Leader Burner
+    Sepolia-->>UI_L: Exit Mined! Leader USDC restored to 20.17 USDC (+0.70 USDC net profit)
+
+    Follower->>UI_F: Click "🚀 Bull Move ($3,350)" in CopyTradeModal
+    UI_F->>Sepolia: Reverse Leg 1: Follower Burner returns 0.0005 WETH to Vault
+    UI_F->>Sepolia: Reverse Leg 2: Vault transfers $1.67 USDC (Principal + Net Profit) to Follower Burner
+    Sepolia-->>UI_F: Exit Mined! Follower USDC restored to 15.17 USDC (+0.17 USDC net profit)
+```
+
+### Detailed Breakdown of the Steps:
+
+#### 1. Leader Order Input & Arkiv Sequential Promise Sealing
+- **Endpoint:** `POST /api/trades/promise`
+- **What happens:**
+  1. The leader selects their trading pair (`ETH/USDC`), side (`BUY`), order type (`BRACKET`), entry limit (`$3,000`), trade capital (`$3.00 USDC`), Take-Profit target (`$3,350`), and Stop-Loss floor (`$2,800`).
+  2. The server increments the leader's sequential trade counter (`tradeIndex: 1, 2, 3...`) stored in MongoDB and computes an HMAC payload hash:
+     $$\text{hash} = \text{HMAC-SHA256}(\text{tradeIndex} + \text{symbol} + \text{side} + \text{limit} + \text{amount} + \text{burnerAddress}, \text{secretKey})$$
+  3. The relayer signs and broadcasts an onchain `createEntity` transaction to **Arkiv Rabdi Testnet** using schema `trade_promises` with a 30-day immutable audit retention.
+  4. Returns the sealed entity key (e.g. `0x3d1566e6bc977b4c3701745f9bb54a1c3d8828707455167c23df807d77583621`) and links to the [Arkiv Rabdi Explorer](https://rabdi.explorer.arkiv.network/entity-explorer).
+
+#### 2. Real Atomic Two-Leg Swap on Ethereum Sepolia
+- **Module:** [`executeTwoLegSwap`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/lib/flashEngine.ts#L79)
+- **What happens:**
+  1. **Leg 1:** Leader Burner (`0x2e5B...57F9`) transfers `$3.00 USDC` to the `FlashTradePool` Vault (`0xA360...05E8`) on the canonical Circle Sepolia USDC contract (`0x1c7D...7238`).
+  2. **Leg 2:** `FlashTradePool` Vault immediately executes the counterparty leg, transferring `0.001 WETH` directly into the Leader Burner on the canonical WETH9 contract (`0x7b79...e7f9`).
+  3. Real transaction receipts are confirmed on Ethereum Sepolia, providing authentic Etherscan links.
+
+#### 3. Signal Encryption & Arkiv Real-Time Dissemination
+- **Endpoint:** `POST /api/trades/signal`
+- **What happens:**
+  1. The leader terminal informs the relayer that the order has filled.
+  2. The server queries active human followers from MongoDB and Arkiv (`follower_relationships`).
+  3. The trade signal payload is encrypted using each follower's public key via **AES-256-GCM** with 512-byte fixed-length padding (preventing traffic analysis).
+  4. The encrypted envelope is written to **Arkiv** under schema `trade_signals` with a **strict 10-minute TTL (`600s`)**. After 10 minutes, Arkiv nodes automatically prune the entity from state, permanently preventing alpha leakage.
+  5. The signal is simultaneously pushed in sub-50ms via WebSockets (`broadcastTradeSignal`) to all connected active follower sessions.
+
+#### 4. Follower Notification & Proportional Copy Execution
+- **Component:** [`CopyTradeModal.tsx`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/components/CopyTradeModal.tsx)
+- **What happens:**
+  1. Follower receives an amber live trade banner in real time with an audio/visual cue.
+  2. Clicking "Review & Copy" opens the modal displaying the leader's entry price, bracket targets, and duration remaining on the 10-minute TTL.
+  3. **Custom Capital Allocation:** Follower can adjust copy amount (e.g., $1.50 USDC instead of the leader's $3.00 USDC).
+  4. Follower clicks "Confirm & Copy Trade":
+     - The transaction executes via the **Dedicated Follower Burner (`0x915E...3AF6`)**.
+     - Follower Burner transfers `$1.50 USDC` to Vault; Vault transfers `0.0005 WETH` to Follower Burner.
+     - Follower position status switches to **ACTIVE (0.0005 WETH)** with live unrealized PnL tracking.
+
+#### 5. Dual Onchain Exit Settlements (Bull Move & Bear Dump)
+- Both Leader and Follower have interactive exit buttons directly in their interfaces:
+  - **🚀 Bull Move (Take-Profit Trigger @ $3,350):**
+    - Triggers Take-Profit onchain settlement:
+    - Burner returns WETH to FlashTradePool Vault.
+    - Vault releases gross proceeds in USDC:
+      $$\text{Payout} = \text{Principal} + (\text{Capital} \times 11.67\%) - 30\text{ bps protocol fee} = \text{Principal} + 11.30\%\text{ Net Gain}$$
+    - For $3.00 entry: returns **$3.34 USDC** (+0.34 net profit).
+    - For $1.50 entry: returns **$1.67 USDC** (+0.17 net profit).
+  - **📉 Bear Dump (Stop-Loss Trigger @ $2,800):**
+    - Triggers Stop-Loss defensive exit onchain settlement:
+    - Burner returns WETH to Vault; Vault refunds remaining capital:
+      $$\text{Refund} = \text{Principal} - (\text{Capital} \times 6.67\%) = \text{Principal} - 6.67\%$$
+    - For $3.00 entry: returns **$2.80 USDC** (-$0.20 loss).
+    - For $1.50 entry: returns **$1.40 USDC** (-$0.10 loss).
+- Verified on Etherscan: both WETH and USDC balances update in real time on the blockchain.
+
+---
+
+## 4. Recent UX & Platform Enhancements
+
+### 1. Dedicated Burner Partitioning
+- Separated `LEADER_BURNER_KEY` and `FOLLOWER_BURNER_KEY` to guarantee that multi-user testing in split-screen or separate browser sessions never collides or interferes with token allowances or open WETH positions.
+
+### 2. Inline Account Numbers for Small Networks (< 3 Accounts)
+- In [`Dashboard.tsx`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/pages/Dashboard.tsx), [`ProfilePage.tsx`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/pages/ProfilePage.tsx), and [`LeaderTerminalPage.tsx`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/pages/LeaderTerminalPage.tsx):
+  - When the user has `< 3` followers or is following `< 3` accounts, the interface displays their truncated wallet addresses inline directly on the card with one-click clipboard copy chips.
+  - Eliminates the need to click into sub-modals just to verify who is subscribed.
+
+### 3. MetaMask Connection Prompt Banner
+- When a user signs in via World ID (verifying their uniqueness as a human) but hasn't yet connected their Web3 wallet, an amber notification banner ([`MetaMaskPromptBanner.tsx`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/components/MetaMaskPromptBanner.tsx)) prompts them to connect MetaMask.
+- In the navigation header, the raw hex nullifier is cleanly replaced with a green `Verified Human` badge, and an integrated [`WalletConnectButton`](file:///Users/omkar/projects/syndicate-ethmumbai/frontend/src/components/WalletConnectButton.tsx) enables 1-click wallet linking.
+
+### 4. Interactive Judge Log Export (`output.md`)
+- Both the Leader Terminal and Flash Trade Desk aggregate all live protocol steps into `window.judgeLogs`.
+- Hackathon judges can click **"Download Judge Logs (.md)"** to immediately receive a formatted Markdown export of all signed EIP-712 orders, Arkiv sealed entities, and Etherscan transaction receipts.
+
+---
+
+## 5. Network & Onchain Infrastructure
 
 | Resource | Specification | Details |
 |---|---|---|
-| **Network** | Ethereum Sepolia Testnet (L1) | Chain ID: `11155111` |
-| **RPC Endpoint** | `https://ethereum-sepolia-rpc.publicnode.com` | Direct JSON-RPC connection via `viem` |
-| **Block Explorer** | [Etherscan Sepolia](https://sepolia.etherscan.io) | Public testnet ledger verification |
+| **Settlement Network** | Ethereum Sepolia Testnet (L1) | Chain ID: `11155111` |
+| **Data Anchoring Network** | Arkiv Rabdi Testnet | Chain ID: `7794095` (Gas currency: `tGLM`) |
+| **Production Execution** | Base Mainnet (L2) | Chain ID: `8453` (Sub-second execution) |
+| **Sepolia RPC Endpoint** | `https://ethereum-sepolia-rpc.publicnode.com` | Direct JSON-RPC connection via `viem` |
+| **Arkiv RPC Endpoint** | `https://rabdi.rpc.arkiv.network` | Arkiv Rabdi JSON-RPC |
+| **Sepolia Explorer** | [Etherscan Sepolia](https://sepolia.etherscan.io) | Public testnet ledger verification |
+| **Arkiv Explorer** | [Arkiv Rabdi Explorer](https://rabdi.explorer.arkiv.network/entity-explorer) | Decentralized entity storage explorer |
 | **WETH9 Contract** | `0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9` | Official Ethereum Sepolia Wrapped Ether contract |
 | **USDC Contract** | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` | Official Circle USDC contract on Sepolia |
 | **Privacy Pool** | Kohaku / Railgun | Onchain private pool on Ethereum Sepolia |
@@ -63,7 +225,7 @@ Mnemonic: "honey gadget trigger smooth menu okay luxury walk refuse behind cushi
 
 ---
 
-## 4. Understanding "Simulate" vs. "Execute"
+## 6. Understanding "Simulate" vs. "Execute"
 
 The `/flash-trade` terminal features two primary buttons. Here is exactly what each does:
 
@@ -104,7 +266,7 @@ The `/flash-trade` terminal features two primary buttons. Here is exactly what e
 
 ---
 
-## 5. Actual JSON Payloads & Transaction Data
+## 7. Actual JSON Payloads & Transaction Data
 
 The terminal includes an interactive **Live JSON Transaction & Protocol Payloads** inspector displaying three distinct schemas:
 
@@ -211,7 +373,7 @@ This is the cryptographic commitment broadcast to Arkiv so followers can open th
 
 ---
 
-## 6. How to Run & Verify
+## 8. How to Run & Verify
 
 1. Start the application:
    ```bash
@@ -224,7 +386,7 @@ This is the cryptographic commitment broadcast to Arkiv so followers can open th
 
 ---
 
-## 7. Internal Team Primer & Glossary (New to Flash Trading?)
+## 9. Internal Team Primer & Glossary (New to Flash Trading?)
 
 This section is written specifically for our team members who are new to Definitive Flash, advanced orderbooks, or zero-knowledge copy trading.
 
@@ -259,7 +421,7 @@ This section is written specifically for our team members who are new to Definit
 
 ---
 
-## 8. Deep-Dive: How Price Movement & Triggers (TP/SL) Work
+## 10. Deep-Dive: How Price Movement & Triggers (TP/SL) Work
 
 This section explains the exact mechanics behind price determination, oracle data feeds, and how Definitive Flash keepers trigger Take-Profit and Stop-Loss orders.
 
@@ -452,7 +614,7 @@ Click "⚡ Execute Take-Profit Exit on Ethereum Sepolia"
 
 ---
 
-## 9. Comprehensive FAQ: Custody, Authority, Reverse Swaps & Simulation Mechanics
+## 11. Comprehensive FAQ: Custody, Authority, Reverse Swaps & Simulation Mechanics
 
 This section answers the fundamental questions regarding how non-custodial custody works, how the protocol gets authority over user balances, how automated reverse swaps occur without the user, and how our Ethereum Sepolia testnet demo mirrors production architecture.
 
@@ -615,7 +777,7 @@ When you test the full flow on [`http://localhost:5173/flash-trade`](http://loca
 
 ---
 
-## 10. Production Deployment Architecture — Definitive Flash on Base Mainnet (Chain ID 8453)
+## 12. Production Deployment Architecture — Definitive Flash on Base Mainnet (Chain ID 8453)
 
 In production, SyndicateCopy employs a **dual-chain architecture** that combines the institutional privacy of Ethereum L1 with the high-throughput, low-cost execution of Base L2:
 
