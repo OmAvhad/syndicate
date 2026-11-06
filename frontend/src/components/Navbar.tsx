@@ -1,44 +1,20 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
+import { useSignals } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
-import {
-  LogOut,
-  User,
-  ChevronDown,
-  ShieldCheck,
-  Menu,
-  X,
-  LayoutDashboard,
-  Wallet,
-  Compass,
-  Sun,
-  Moon,
-} from 'lucide-react'
+import ThemeToggle from '@/components/ThemeToggle'
+import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio } from 'lucide-react'
 
 export default function Navbar() {
   const { user, logout } = useAuth()
+  const { activeSignalCount } = useSignals()
   const navigate = useNavigate()
   const location = useLocation()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [isLight, setIsLight] = useState(() =>
-    typeof document !== 'undefined' ? document.documentElement.classList.contains('light') : false
-  )
 
   const identifier = user?.username || truncateHash(user?.nullifierHash)
-
-  const toggleTheme = () => {
-    if (isLight) {
-      document.documentElement.classList.remove('light')
-      localStorage.setItem('syndicate_theme', 'dark')
-      setIsLight(false)
-    } else {
-      document.documentElement.classList.add('light')
-      localStorage.setItem('syndicate_theme', 'light')
-      setIsLight(true)
-    }
-  }
 
   const handleLogout = () => {
     logout()
@@ -67,11 +43,10 @@ export default function Navbar() {
         <div className="hidden md:flex items-center gap-3">
           <Link
             to="/"
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
-              location.pathname === '/'
-                ? 'bg-surface-raised text-text-primary border border-border'
-                : 'text-text-secondary hover:text-text-primary hover:bg-surface'
-            }`}
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/'
+              ? 'bg-surface-raised text-text-primary border border-border'
+              : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+              }`}
           >
             <LayoutDashboard className="w-3.5 h-3.5" />
             Dashboard
@@ -79,15 +54,33 @@ export default function Navbar() {
 
           <Link
             to="/explore"
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
-              location.pathname === '/explore'
-                ? 'bg-surface-raised text-text-primary border border-border'
-                : 'text-text-secondary hover:text-text-primary hover:bg-surface'
-            }`}
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/explore'
+              ? 'bg-surface-raised text-text-primary border border-border'
+              : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+              }`}
           >
             <Compass className="w-3.5 h-3.5" />
             Explore
           </Link>
+
+          <Link
+            to="/trade"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/trade'
+              ? 'bg-accent text-text-inverse shadow-[0_0_12px_rgba(198,243,106,0.2)]'
+              : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+              }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 stroke-[2.2]" />
+            <span>Trade Terminal</span>
+          </Link>
+
+          {/* Active Signals Live Indicator */}
+          {activeSignalCount > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-pill bg-accent-soft border border-accent/40 text-xs text-accent animate-pulse font-semibold">
+              <Radio className="w-3 h-3 text-accent" />
+              <span>{activeSignalCount} Signal{activeSignalCount > 1 ? 's' : ''} Live</span>
+            </div>
+          )}
 
           {/* World ID Verified Pill */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-surface border border-border text-xs text-text-secondary">
@@ -112,15 +105,8 @@ export default function Navbar() {
             </Link>
           )}
 
-          {/* Light / Dark Mode Toggle */}
-          <button
-            onClick={toggleTheme}
-            className="w-8 h-8 rounded-pill flex items-center justify-center bg-surface border border-border text-text-secondary hover:text-accent hover:border-accent transition-colors cursor-pointer"
-            title={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
-            aria-label="Toggle Theme"
-          >
-            {isLight ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
-          </button>
+          {/* Theme Switcher Button */}
+          <ThemeToggle variant="compact" />
 
           {/* Profile Dropdown */}
           <div className="relative">
@@ -135,9 +121,8 @@ export default function Navbar() {
                 {user?.username ? `@${user.username}` : identifier}
               </span>
               <ChevronDown
-                className={`w-3.5 h-3.5 text-text-muted transition-transform duration-fast ${
-                  dropdownOpen ? 'rotate-180' : ''
-                }`}
+                className={`w-3.5 h-3.5 text-text-muted transition-transform duration-fast ${dropdownOpen ? 'rotate-180' : ''
+                  }`}
               />
             </button>
 
@@ -185,13 +170,7 @@ export default function Navbar() {
 
         {/* Mobile toggle */}
         <div className="flex items-center gap-2 md:hidden">
-          <button
-            onClick={toggleTheme}
-            className="p-2 text-text-secondary hover:text-accent"
-            aria-label="Toggle Theme"
-          >
-            {isLight ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </button>
+          <ThemeToggle variant="compact" />
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
             className="text-text-secondary hover:text-text-primary p-2"
@@ -222,6 +201,19 @@ export default function Navbar() {
             Explore Leaders
           </Link>
           <Link
+            to="/trade"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
+          >
+            <TrendingUp className="w-4 h-4 text-accent" />
+            <span>Trade Terminal</span>
+            {activeSignalCount > 0 && (
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded-pill bg-accent text-text-inverse font-bold">
+                {activeSignalCount} Live
+              </span>
+            )}
+          </Link>
+          <Link
             to="/profile"
             onClick={() => setMobileOpen(false)}
             className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
@@ -229,6 +221,10 @@ export default function Navbar() {
             <User className="w-4 h-4 text-accent" />
             Profile & Wallet
           </Link>
+          <div className="flex items-center justify-between px-3 py-2 rounded-md bg-surface border border-border">
+            <span className="text-xs font-semibold text-text-secondary">Theme</span>
+            <ThemeToggle variant="pill" showLabel />
+          </div>
           <div className="h-px bg-border" />
           <button
             onClick={handleLogout}

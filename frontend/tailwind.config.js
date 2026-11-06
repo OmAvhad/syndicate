@@ -8,32 +8,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "var(--color-bg)",
+        bg: "rgb(var(--color-bg-rgb) / <alpha-value>)",
         surface: {
-          DEFAULT: "var(--color-surface)",
-          raised: "var(--color-surface-raised)",
-          hover: "var(--color-surface-hover)",
+          DEFAULT: "rgb(var(--color-surface-rgb) / <alpha-value>)",
+          raised: "rgb(var(--color-surface-raised-rgb) / <alpha-value>)",
+          hover: "rgb(var(--color-surface-hover-rgb) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "var(--color-accent)",
-          muted: "var(--color-accent-muted)",
+          DEFAULT: "rgb(var(--color-accent-rgb) / <alpha-value>)",
+          muted: "rgb(var(--color-accent-muted-rgb) / <alpha-value>)",
           soft: "var(--color-accent-soft)",
         },
         text: {
-          primary: "var(--color-text-primary)",
-          secondary: "var(--color-text-secondary)",
-          muted: "var(--color-text-muted)",
-          inverse: "var(--color-text-inverse)",
+          primary: "rgb(var(--color-text-primary-rgb) / <alpha-value>)",
+          secondary: "rgb(var(--color-text-secondary-rgb) / <alpha-value>)",
+          muted: "rgb(var(--color-text-muted-rgb) / <alpha-value>)",
+          inverse: "rgb(var(--color-text-inverse-rgb) / <alpha-value>)",
         },
         border: {
-          DEFAULT: "var(--color-border)",
-          strong: "var(--color-border-strong)",
+          DEFAULT: "rgb(var(--color-border-rgb) / <alpha-value>)",
+          strong: "rgb(var(--color-border-strong-rgb) / <alpha-value>)",
         },
         semantic: {
-          success: "var(--color-success)",
-          warning: "var(--color-warning)",
-          danger: "var(--color-danger)",
-          info: "var(--color-info)",
+          success: "rgb(var(--color-success-rgb) / <alpha-value>)",
+          warning: "rgb(var(--color-warning-rgb) / <alpha-value>)",
+          danger: "rgb(var(--color-danger-rgb) / <alpha-value>)",
+          info: "rgb(var(--color-info-rgb) / <alpha-value>)",
         },
       },
       borderRadius: {
