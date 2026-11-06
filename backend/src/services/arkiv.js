@@ -26,12 +26,12 @@ const getPrivateKey = () => process.env.ARKIV_PRIVATE_KEY || process.env.SIGNER_
  * - TTL: 30 days
  */
 export const FollowerSchema = defineSchema('follower_relationships', {
-  leaderNullifier:    str().indexed(),
-  leaderPublicKey:    addr().indexed(),
-  followerNullifier:  str().indexed(),
-  followerPublicKey:  addr().indexed(),
-  transactionId:      str().indexed(),
-  transactionDate:    str().indexed(),
+  leaderNullifier: str().indexed(),
+  leaderPublicKey: addr().indexed(),
+  followerNullifier: str().indexed(),
+  followerPublicKey: addr().indexed(),
+  transactionId: str().indexed(),
+  transactionDate: str().indexed(),
 });
 
 /**
@@ -44,11 +44,11 @@ export const FollowerSchema = defineSchema('follower_relationships', {
  * - ttl (time-to-live: 10 minutes)
  */
 export const TradeSignalSchema = defineSchema('trade_signals', {
-  signalId:             str().indexed(),
+  signalId: str().indexed(),
   encryptedTradeSignal: bytes(),
-  leaderPublicKey:      addr().indexed(),
-  followerPublicKey:    addr().indexed(),
-  ttl:                  u64().indexed(),
+  leaderPublicKey: addr().indexed(),
+  followerPublicKey: addr().indexed(),
+  ttl: u64().indexed(),
 });
 
 /**
@@ -217,17 +217,17 @@ export async function storeTradeSignalInArkiv({
   followerPublicKey,
   ttl = 600, // 10 minutes in seconds
 }) {
+  const payload = {
+    signalId: str(signalId),
+    encryptedTradeSignal: bytes(Buffer.from(encryptedTradeSignal, 'utf8')),
+    leaderPublicKey: addr(leaderPublicKey),
+    followerPublicKey: addr(followerPublicKey),
+    ttl: u64(BigInt(ttl)),
+  };
+
   console.log(`[Arkiv] Storing encrypted trade signal for follower ${followerPublicKey.slice(0, 8)}... (TTL 10m)`);
 
   try {
-    const payload = {
-      signalId: str(signalId),
-      encryptedTradeSignal: bytes(Buffer.from(encryptedTradeSignal, 'utf8')),
-      leaderPublicKey: addr(leaderPublicKey),
-      followerPublicKey: addr(followerPublicKey),
-      ttl: u64(BigInt(ttl)),
-    };
-
     const walletClient = getArkivWalletClient();
     if (walletClient) {
       // 10 minutes time-to-live strictly per spec.md

@@ -16,6 +16,11 @@ const userSchema = new mongoose.Schema({
     trim: true,
     lowercase: true,
   },
+  encryptionPublicKey: {
+    type: String,
+    default: null,
+    trim: true,
+  },
   walletConnectedAt: {
     type: Date,
     default: null,

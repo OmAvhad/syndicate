@@ -28,6 +28,8 @@ import {
   Download,
   Flame,
   Wallet,
+  Lock,
+  KeyRound,
 } from 'lucide-react'
 
 interface CopyTradeModalProps {
@@ -43,12 +45,15 @@ interface FollowerLogItem {
 }
 
 export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps) {
-  const { executeCopyTrade } = useSignals()
+  const { executeCopyTrade, decryptSignal } = useSignals()
 
-  // Default custom amount initialized from leader's signal amount or $2.00
-  const defaultAmount = signal.amount ? String(signal.amount) : '2.00'
+  // Encrypted signals receive their default amount after decryption.
+  const defaultAmount = signal.amount
+    ? String(signal.amount)
+    : signal.requiresMetaMaskDecrypt ? '' : '2.00'
   const [amount, setAmount] = useState(defaultAmount)
   const [isExecuting, setIsExecuting] = useState(false)
+  const [isDecrypting, setIsDecrypting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [onchainReceipt, setOnchainReceipt] = useState<OnchainExecutionResult | null>(null)
   const [executionReceipt, setExecutionReceipt] = useState<{ tradeId: string } | null>(null)
@@ -83,6 +88,25 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
     setCopyLogs(prev => [...prev, { time, type, message, link }])
   }, [])
 
+  // Update amount once decrypted if signal.amount was previously null
+  useEffect(() => {
+    if (signal.amount != null) {
+      setAmount(current => current === '' ? String(signal.amount) : current)
+    }
+  }, [signal.amount])
+
+  const isEncrypted = Boolean(signal.requiresMetaMaskDecrypt && !signal.isDecrypted)
+
+  const handleDecrypt = async () => {
+    setIsDecrypting(true)
+    setErrorMessage(null)
+    const res = await decryptSignal(signal.signalId)
+    setIsDecrypting(false)
+    if (!res.success) {
+      setErrorMessage(res.error || 'Failed to decrypt trade signal')
+    }
+  }
+
   const formatTimer = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
@@ -107,6 +131,12 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
 
   const handleExecute = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (isEncrypted) {
+      setErrorMessage('Please decrypt the signal with MetaMask before placing your trade')
+      return
+    }
+
     setIsExecuting(true)
     setErrorMessage(null)
     setCopyLogs([])
@@ -657,6 +687,65 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
               </span>
             </div>
 
+            {/* Asymmetric Private-Key Decryption Banner if signal is encrypted */}
+            {signal.requiresMetaMaskDecrypt && (
+              <div
+                className={`p-3.5 rounded-md border text-xs transition-all ${
+                  isEncrypted
+                    ? 'bg-accent/10 border-accent/40 shadow-sm'
+                    : 'bg-semantic-success/10 border-semantic-success/30'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    {isEncrypted ? (
+                      <Lock className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                    ) : (
+                      <ShieldCheck className="w-4 h-4 text-semantic-success shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <div className="font-bold text-text-primary flex items-center gap-1.5">
+                        <span>
+                          {isEncrypted
+                            ? 'Private-Key Encrypted Signal'
+                            : 'Decrypted with MetaMask Private Key'}
+                        </span>
+                        <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 rounded bg-surface border border-border text-text-secondary">
+                          eth_decrypt
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-text-secondary mt-1">
+                        {isEncrypted
+                          ? 'This trade signal is encrypted with your Curve25519 public key. Decrypt it via MetaMask to view price, stop loss, and target.'
+                          : 'Order parameters unlocked using your native MetaMask private key.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isEncrypted && (
+                    <button
+                      type="button"
+                      onClick={handleDecrypt}
+                      disabled={isDecrypting}
+                      className="shrink-0 py-1.5 px-3 rounded-sm bg-accent text-text-inverse font-bold text-xs hover:bg-[#d4f885] transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                    >
+                      {isDecrypting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Decrypting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-3.5 h-3.5 stroke-[2.2]" />
+                          <span>Decrypt Signal</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Signal Details Summary Grid */}
             <div className="p-3.5 rounded-lg bg-surface-raised border border-border space-y-2 text-xs">
               <div className="flex justify-between items-center">
@@ -686,18 +775,39 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
               </div>
 
               <div className="flex justify-between items-center">
-                <span className="text-text-muted uppercase tracking-wider font-semibold">Entry Limit</span>
-                <span className="mono tnum font-bold text-text-primary">${signal.limit}</span>
+                <span className="text-text-muted uppercase tracking-wider font-semibold">Limit Price</span>
+                {isEncrypted ? (
+                  <span className="inline-flex items-center gap-1 text-accent font-semibold">
+                    <Lock className="w-3 h-3" />
+                    <span>Locked (MetaMask Encrypted)</span>
+                  </span>
+                ) : (
+                  <span className="mono tnum font-bold text-text-primary">${signal.limit}</span>
+                )}
               </div>
 
               <div className="flex justify-between items-center">
                 <span className="text-text-muted uppercase tracking-wider font-semibold">Take Profit Target</span>
-                <span className="mono tnum text-semantic-success font-bold">${signal.target}</span>
+                {isEncrypted ? (
+                  <span className="inline-flex items-center gap-1 text-text-muted font-medium">
+                    <Lock className="w-3 h-3 text-accent" />
+                    <span>Locked</span>
+                  </span>
+                ) : (
+                  <span className="mono tnum text-semantic-success font-semibold">${signal.target}</span>
+                )}
               </div>
 
               <div className="flex justify-between items-center">
                 <span className="text-text-muted uppercase tracking-wider font-semibold">Stop Loss</span>
-                <span className="mono tnum text-semantic-danger font-bold">${signal.stopLoss}</span>
+                {isEncrypted ? (
+                  <span className="inline-flex items-center gap-1 text-text-muted font-medium">
+                    <Lock className="w-3 h-3 text-accent" />
+                    <span>Locked</span>
+                  </span>
+                ) : (
+                  <span className="mono tnum text-semantic-danger font-semibold">${signal.stopLoss}</span>
+                )}
               </div>
 
               {signal.arkivEntityKey && (
@@ -765,7 +875,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
             </div>
 
             {/* Custom Amount Field with Quick Presets */}
-            <div className="space-y-2">
+            <fieldset disabled={isEncrypted} className="space-y-2 disabled:opacity-50">
               <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center justify-between">
                 <span>Your Copy Capital (USDC)</span>
                 <span className="text-[11px] text-accent font-bold">Currency: $ USDC</span>
@@ -805,7 +915,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 {signal.amount && (
                   <button
                     type="button"
-                    onClick={() => setAmount(String(Number((signal.amount * 0.5).toFixed(2))))}
+                    onClick={() => setAmount(String(Number((Number(signal.amount) * 0.5).toFixed(2))))}
                     className={`text-[10px] px-2 py-0.5 rounded font-bold transition-colors cursor-pointer border ${
                       amount === String(Number((signal.amount * 0.5).toFixed(2)))
                         ? 'bg-accent text-text-inverse border-accent'
@@ -832,7 +942,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
               </div>
 
               {/* Dynamic Projection Box */}
-              <div className="p-2.5 rounded-md bg-surface border border-border text-[11px] space-y-1">
+              {!isEncrypted && <div className="p-2.5 rounded-md bg-surface border border-border text-[11px] space-y-1">
                 <div className="flex justify-between items-center">
                   <span className="text-text-muted">Estimated Position Size:</span>
                   <span className="mono font-bold text-accent">~{calculatedWeth} WETH</span>
@@ -849,8 +959,8 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     -${stopLossRiskUsdc.toFixed(2)} USDC (-{stopLossRiskPct}%)
                   </span>
                 </div>
-              </div>
-            </div>
+              </div>}
+            </fieldset>
 
             {errorMessage && (
               <div className="p-3 rounded-md bg-semantic-danger/10 border border-semantic-danger/30 text-xs text-semantic-danger flex items-start gap-2">
@@ -869,23 +979,44 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 Cancel
               </button>
 
-              <button
-                type="submit"
-                disabled={isExecuting || signal.remainingSeconds <= 0}
-                className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {isExecuting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Executing Two-Leg Swap...</span>
-                  </>
-                ) : (
-                  <>
-                    <TrendingUp className="w-3.5 h-3.5 stroke-[2.2]" />
-                    <span>Execute Copy (${numAmount.toFixed(2)} USDC)</span>
-                  </>
-                )}
-              </button>
+              {isEncrypted ? (
+                <button
+                  type="button"
+                  onClick={handleDecrypt}
+                  disabled={isDecrypting}
+                  className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {isDecrypting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Confirm in MetaMask...</span>
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="w-3.5 h-3.5 stroke-[2.2]" />
+                      <span>Decrypt with MetaMask</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={isExecuting || signal.remainingSeconds <= 0}
+                  className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {isExecuting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Executing Two-Leg Swap...</span>
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUp className="w-3.5 h-3.5 stroke-[2.2]" />
+                      <span>Execute Copy (${numAmount.toFixed(2)} USDC)</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
           </form>

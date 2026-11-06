@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
-import { getBaseScanAddressUrl } from '@/lib/network'
-import { Wallet, Loader2, Check, Copy, ExternalLink, X, RefreshCw } from 'lucide-react'
+import { getBaseScanAddressUrl, getMetaMaskEncryptionPublicKey } from '@/lib/network'
+import { Wallet, Loader2, Check, Copy, ExternalLink, X, RefreshCw, KeyRound, ShieldCheck } from 'lucide-react'
 
 // Typing for MetaMask window.ethereum provider
 interface EthereumProvider {
@@ -37,8 +37,10 @@ export default function WalletConnectButton({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
+  const [isEnablingEncryption, setIsEnablingEncryption] = useState(false)
 
   const walletAddress = user?.walletAddress
+  const encryptionPublicKey = user?.encryptionPublicKey
 
   // Listen to accountsChanged in MetaMask if window.ethereum is present
   useEffect(() => {
@@ -91,9 +93,20 @@ export default function WalletConnectButton({
 
       const selectedAddress = accounts[0].toLowerCase()
 
-      // 2. Persist the public key to the backend database (honest state: saving)
+      // 2. Request ECIES Encryption Public Key from MetaMask (eth_getEncryptionPublicKey)
+      let encPubKey: string | null = null
+      try {
+        encPubKey = await getMetaMaskEncryptionPublicKey(selectedAddress)
+      } catch (pkErr) {
+        console.warn('[Wallet] User postponed MetaMask encryption public key request:', pkErr)
+      }
+
+      // 3. Persist the wallet address and encryption public key to backend (honest state: saving)
       setState('saving')
-      const res = await api.post('/api/user/wallet', { walletAddress: selectedAddress })
+      const res = await api.post('/api/user/wallet', {
+        walletAddress: selectedAddress,
+        encryptionPublicKey: encPubKey,
+      })
 
       if (res.data?.success) {
         await refreshUser()
@@ -132,6 +145,33 @@ export default function WalletConnectButton({
       setErrorMessage(e?.response?.data?.error || e?.message || 'Failed to disconnect wallet.')
     } finally {
       setIsDisconnecting(false)
+    }
+  }
+
+  const enableEncryption = async () => {
+    if (!walletAddress) return
+    setIsEnablingEncryption(true)
+    setErrorMessage(null)
+    try {
+      const pk = await getMetaMaskEncryptionPublicKey(walletAddress)
+      const res = await api.post('/api/user/wallet', {
+        walletAddress,
+        encryptionPublicKey: pk,
+      })
+      if (res.data?.success) {
+        await refreshUser()
+      } else {
+        throw new Error(res.data?.error || 'Failed to update encryption key')
+      }
+    } catch (err: unknown) {
+      const e = err as { code?: number; message?: string; response?: { data?: { error?: string } } }
+      if (e?.code === 4001) {
+        setErrorMessage('Encryption key request rejected in MetaMask.')
+      } else {
+        setErrorMessage(e?.response?.data?.error || e?.message || 'Failed to authorize encryption key in MetaMask.')
+      }
+    } finally {
+      setIsEnablingEncryption(false)
     }
   }
 
@@ -230,6 +270,48 @@ export default function WalletConnectButton({
               Disconnect
             </button>
           </div>
+        </div>
+
+        {/* ECIES Decryption Status Row */}
+        <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1.5">
+            {encryptionPublicKey ? (
+              <>
+                <ShieldCheck className="w-4 h-4 text-semantic-success" />
+                <span className="text-text-secondary">
+                  MetaMask <strong className="text-text-primary">eth_decrypt</strong> active
+                </span>
+              </>
+            ) : (
+              <>
+                <KeyRound className="w-4 h-4 text-semantic-warning" />
+                <span className="text-text-secondary">
+                  Private-key decryption not enabled
+                </span>
+              </>
+            )}
+          </div>
+
+          {!encryptionPublicKey && (
+            <button
+              type="button"
+              onClick={enableEncryption}
+              disabled={isEnablingEncryption}
+              className="py-1 px-2.5 rounded-sm bg-accent text-text-inverse font-semibold text-[11px] hover:bg-[#d4f885] transition-colors flex items-center gap-1 shadow-sm"
+            >
+              {isEnablingEncryption ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <span>Authorizing...</span>
+                </>
+              ) : (
+                <>
+                  <KeyRound className="w-3 h-3" />
+                  <span>Enable eth_decrypt</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {errorMessage && (

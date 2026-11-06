@@ -38,6 +38,13 @@ const tradeSignalSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    encryptedPayloadHex: {
+      type: String,
+    },
+    requiresMetaMaskDecrypt: {
+      type: Boolean,
+      default: false,
+    },
     tradePayload: {
       symbol: String,
       side: String,

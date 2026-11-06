@@ -1,7 +1,30 @@
 import crypto from 'crypto';
+import { encrypt, decrypt } from '@metamask/eth-sig-util';
 import '../env.js';
 
 const getHashSecret = () => process.env.TRADE_HASH_SECRET || 'syndicate_trade_hash_secret_key_2026_arkdb';
+
+/**
+ * Encrypt trade signal using MetaMask's asymmetric encryption key (x25519-xsalsa20-poly1305)
+ * The resulting payload can ONLY be decrypted by the follower's private key via window.ethereum.request({ method: 'eth_decrypt' })
+ */
+export function encryptForMetaMask(tradeData, encryptionPublicKey) {
+  const enc = encrypt({
+    publicKey: encryptionPublicKey,
+    data: JSON.stringify(tradeData),
+    version: 'x25519-xsalsa20-poly1305',
+  });
+
+  const jsonString = JSON.stringify(enc);
+  // Hex format required by MetaMask eth_decrypt
+  const encryptedHex = `0x${Buffer.from(jsonString, 'utf8').toString('hex')}`;
+
+  return {
+    encryptedHex,
+    encryptedObject: enc,
+    jsonString,
+  };
+}
 
 /**
  * Computes deterministic HMAC-SHA256 hash of trade payload for /promise and order integrity

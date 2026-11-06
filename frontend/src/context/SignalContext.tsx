@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext'
 import api from '@/lib/api'
+import { decryptWithMetaMask } from '@/lib/network'
 
 export interface TradeSignalItem {
   signalId: string
@@ -10,16 +11,21 @@ export interface TradeSignalItem {
   symbol: string
   side: 'BUY' | 'SELL' | 'LONG' | 'SHORT'
   orderType: 'LIMIT' | 'MARKET'
-  limit: number
-  amount: number
-  stopLoss: number
-  target: number
-  burnerAccountAddress?: string
+  limit: number | null
+  amount: number | null
+  stopLoss: number | null
+  target: number | null
+  burnerAccountAddress?: string | null
   arkivEntityKey?: string
   ttlSeconds: number
   expiresAt: string
   createdAt: string
   remainingSeconds: number
+  requiresMetaMaskDecrypt?: boolean
+  encryptedPayloadHex?: string | null
+  isDecrypted?: boolean
+  isDecrypting?: boolean
+  decryptionError?: string | null
 }
 
 interface SignalContextType {
@@ -29,6 +35,7 @@ interface SignalContextType {
   openCopyModal: (signal: TradeSignalItem) => void
   closeCopyModal: () => void
   dismissSignal: (signalId: string) => void
+  decryptSignal: (signalId: string) => Promise<{ success: boolean; error?: string }>
   executeCopyTrade: (signalId: string, customAmount: number, executionTxHash?: string) => Promise<{ success: boolean; error?: string; tradeId?: string }>
   isConnected: boolean
   refreshSignals: () => Promise<void>
@@ -37,7 +44,7 @@ interface SignalContextType {
 const SignalContext = createContext<SignalContextType | undefined>(undefined)
 
 export function SignalProvider({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, user } = useAuth()
   const [signals, setSignals] = useState<TradeSignalItem[]>([])
   const [selectedSignal, setSelectedSignal] = useState<TradeSignalItem | null>(null)
   const [isConnected, setIsConnected] = useState(false)
@@ -56,14 +63,25 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.get('/api/trades/signals/active')
       if (res.data?.success && Array.isArray(res.data.signals)) {
-        const withRemaining: TradeSignalItem[] = res.data.signals
-          .map((s: TradeSignalItem) => ({
-            ...s,
-            remainingSeconds: calculateRemaining(s.expiresAt),
-          }))
-          .filter((s: TradeSignalItem) => s.remainingSeconds > 0)
-
-        setSignals(withRemaining)
+        setSignals((prev) => {
+          const prevMap = new Map(prev.map((s) => [s.signalId, s]))
+          return res.data.signals
+            .map((s: TradeSignalItem) => {
+              const existing = prevMap.get(s.signalId)
+              const isDecrypted = existing?.isDecrypted || !s.requiresMetaMaskDecrypt
+              return {
+                ...s,
+                limit: isDecrypted && existing?.limit != null ? existing.limit : s.limit,
+                amount: isDecrypted && existing?.amount != null ? existing.amount : s.amount,
+                stopLoss: isDecrypted && existing?.stopLoss != null ? existing.stopLoss : s.stopLoss,
+                target: isDecrypted && existing?.target != null ? existing.target : s.target,
+                burnerAccountAddress: isDecrypted && existing?.burnerAccountAddress != null ? existing.burnerAccountAddress : s.burnerAccountAddress,
+                isDecrypted,
+                remainingSeconds: calculateRemaining(s.expiresAt),
+              }
+            })
+            .filter((s: TradeSignalItem) => s.remainingSeconds > 0)
+        })
       }
     } catch (err) {
       console.warn('[SignalContext] Failed to fetch active signals:', err)
@@ -110,6 +128,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
             if (data.type === 'TRADE_SIGNAL' && data.signal) {
               const newSignal: TradeSignalItem = {
                 ...data.signal,
+                isDecrypted: !data.signal.requiresMetaMaskDecrypt,
                 remainingSeconds: calculateRemaining(data.signal.expiresAt),
               }
 
@@ -203,10 +222,85 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // True asymmetric private-key decryption via MetaMask eth_decrypt
+  const decryptSignal = async (signalId: string): Promise<{ success: boolean; error?: string }> => {
+    const target = signals.find((s) => s.signalId === signalId) || selectedSignal
+    if (!target) return { success: false, error: 'Signal not found or expired' }
+
+    if (!target.requiresMetaMaskDecrypt || target.isDecrypted) {
+      return { success: true }
+    }
+
+    if (!target.encryptedPayloadHex) {
+      return { success: false, error: 'Signal is missing encrypted payload hex' }
+    }
+
+    if (!user?.walletAddress) {
+      return { success: false, error: 'Please connect your MetaMask wallet first' }
+    }
+
+    setSignals((prev) =>
+      prev.map((s) => (s.signalId === signalId ? { ...s, isDecrypting: true, decryptionError: null } : s))
+    )
+    if (selectedSignal?.signalId === signalId) {
+      setSelectedSignal((prev) => (prev ? { ...prev, isDecrypting: true, decryptionError: null } : null))
+    }
+
+    try {
+      const decrypted = await decryptWithMetaMask<Record<string, unknown>>(
+        target.encryptedPayloadHex,
+        user.walletAddress
+      )
+
+      const updatedFields = {
+        limit: Number(decrypted.limit ?? decrypted.price ?? 0),
+        amount: Number(decrypted.amount ?? 0),
+        stopLoss: Number(decrypted.stopLoss ?? 0),
+        target: Number(decrypted.target ?? 0),
+        burnerAccountAddress: (decrypted.burnerAccountAddress as string) || target.burnerAccountAddress,
+        isDecrypted: true,
+        isDecrypting: false,
+        decryptionError: null,
+      }
+
+      setSignals((prev) =>
+        prev.map((s) => (s.signalId === signalId ? { ...s, ...updatedFields } : s))
+      )
+
+      if (selectedSignal?.signalId === signalId) {
+        setSelectedSignal((prev) => (prev ? { ...prev, ...updatedFields } : null))
+      }
+
+      return { success: true }
+    } catch (err: unknown) {
+      const e = err as { code?: number; message?: string }
+      const msg =
+        e?.code === 4001
+          ? 'MetaMask private key decryption was rejected'
+          : e?.message || 'Failed to decrypt trade signal with MetaMask'
+
+      setSignals((prev) =>
+        prev.map((s) => (s.signalId === signalId ? { ...s, isDecrypting: false, decryptionError: msg } : s))
+      )
+      if (selectedSignal?.signalId === signalId) {
+        setSelectedSignal((prev) => (prev ? { ...prev, isDecrypting: false, decryptionError: msg } : null))
+      }
+
+      return { success: false, error: msg }
+    }
+  }
+
   // Execute trade order for follower
   const executeCopyTrade = async (signalId: string, customAmount: number, executionTxHash?: string) => {
     const target = signals.find((s) => s.signalId === signalId) || selectedSignal
     if (!target) return { success: false, error: 'Signal not found or expired' }
+
+    if (target.requiresMetaMaskDecrypt && !target.isDecrypted) {
+      return {
+        success: false,
+        error: 'Trade signal must be decrypted with your MetaMask private key before execution',
+      }
+    }
 
     try {
       const res = await api.post('/api/trades/execute', {
@@ -246,6 +340,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
         openCopyModal,
         closeCopyModal,
         dismissSignal,
+        decryptSignal,
         executeCopyTrade,
         isConnected,
         refreshSignals,
