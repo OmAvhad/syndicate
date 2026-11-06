@@ -13,6 +13,7 @@ const formatUserResponse = (user) => ({
   nullifierHash: user.nullifierHash,
   username: user.username || null,
   walletAddress: user.walletAddress || null,
+  encryptionPublicKey: user.encryptionPublicKey || null,
   walletConnectedAt: user.walletConnectedAt || null,
   subscriptionFee: user.subscriptionFee ?? 0.001,
   followersCount: user.followersCount ?? 0,
@@ -103,9 +104,9 @@ router.put('/subscription-fee', async (req, res) => {
   }
 });
 
-// POST /api/user/wallet - Connect and store MetaMask wallet address (public key)
+// POST /api/user/wallet - Connect and store MetaMask wallet address & encryption public key
 router.post('/wallet', async (req, res) => {
-  const { walletAddress } = req.body;
+  const { walletAddress, encryptionPublicKey } = req.body;
 
   if (!walletAddress || typeof walletAddress !== 'string') {
     return res.status(400).json({ error: 'Wallet address is required' });
@@ -120,14 +121,18 @@ router.post('/wallet', async (req, res) => {
 
   try {
     const now = new Date();
+    const updateFields = {
+      walletAddress: trimmed,
+      walletConnectedAt: now,
+    };
+
+    if (encryptionPublicKey && typeof encryptionPublicKey === 'string') {
+      updateFields.encryptionPublicKey = encryptionPublicKey.trim();
+    }
+
     const user = await User.findByIdAndUpdate(
       req.user.userId,
-      {
-        $set: {
-          walletAddress: trimmed,
-          walletConnectedAt: now,
-        },
-      },
+      { $set: updateFields },
       { new: true }
     );
 
@@ -135,10 +140,10 @@ router.post('/wallet', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    console.log(`[Wallet] Stored public key ${trimmed} for user ${user._id}`);
+    console.log(`[Wallet] Stored public key ${trimmed} (encKey: ${!!user.encryptionPublicKey}) for user ${user._id}`);
     return res.json({
       success: true,
-      message: 'Wallet address successfully linked',
+      message: 'Wallet address and encryption key successfully linked',
       user: formatUserResponse(user),
     });
   } catch (error) {
@@ -155,6 +160,7 @@ router.delete('/wallet', async (req, res) => {
       {
         $set: {
           walletAddress: null,
+          encryptionPublicKey: null,
           walletConnectedAt: null,
         },
       },

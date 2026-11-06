@@ -6,6 +6,7 @@ interface User {
   nullifierHash: string
   username?: string
   walletAddress?: string | null
+  encryptionPublicKey?: string | null
   walletConnectedAt?: string | null
   subscriptionFee?: number
   followersCount?: number
