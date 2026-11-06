@@ -5,7 +5,7 @@ import {
   ExpirationTime,
 } from '@arkiv-network/sdk';
 import { rabdi } from '@arkiv-network/sdk/chains';
-import { addr, defineSchema, str, u64 } from '@arkiv-network/sdk/schema';
+import { addr, bytes, defineSchema, str, u64 } from '@arkiv-network/sdk/schema';
 import { http, isHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import crypto from 'crypto';
@@ -45,7 +45,7 @@ export const FollowerSchema = defineSchema('follower_relationships', {
  */
 export const TradeSignalSchema = defineSchema('trade_signals', {
   signalId:             str().indexed(),
-  encryptedTradeSignal: str(),
+  encryptedTradeSignal: bytes(),
   leaderPublicKey:      addr().indexed(),
   followerPublicKey:    addr().indexed(),
   ttl:                  u64().indexed(),
@@ -198,17 +198,17 @@ export async function storeTradeSignalInArkiv({
   followerPublicKey,
   ttl = 600, // 10 minutes in seconds
 }) {
-  const payload = {
-    signalId: str(signalId),
-    encryptedTradeSignal: str(encryptedTradeSignal),
-    leaderPublicKey: addr(leaderPublicKey),
-    followerPublicKey: addr(followerPublicKey),
-    ttl: u64(BigInt(ttl)),
-  };
-
   console.log(`[Arkiv] Storing encrypted trade signal for follower ${followerPublicKey.slice(0, 8)}... (TTL 10m)`);
 
   try {
+    const payload = {
+      signalId: str(signalId),
+      encryptedTradeSignal: bytes(Buffer.from(encryptedTradeSignal, 'utf8')),
+      leaderPublicKey: addr(leaderPublicKey),
+      followerPublicKey: addr(followerPublicKey),
+      ttl: u64(BigInt(ttl)),
+    };
+
     const walletClient = getArkivWalletClient();
     if (walletClient) {
       // 10 minutes time-to-live strictly per spec.md
