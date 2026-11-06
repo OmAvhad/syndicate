@@ -2,33 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Core surfaces */
-  --color-bg: #0B0D0F;
-  --color-surface: #141719;
-  --color-surface-raised: #1A1E21;
-  --color-surface-hover: #202629;
+:root,
+.dark {
+  /* Core surfaces (Dark Mode) */
+  --color-bg-rgb: 11 13 15;
+  --color-surface-rgb: 20 23 25;
+  --color-surface-raised-rgb: 26 30 33;
+  --color-surface-hover-rgb: 32 38 41;
 
   /* Brand accents */
-  --color-accent: #C6F36A;
-  --color-accent-muted: #9FCA4F;
+  --color-accent-rgb: 198 243 106;
+  --color-accent-muted-rgb: 159 202 79;
   --color-accent-soft: rgba(198, 243, 106, 0.12);
 
   /* Text */
-  --color-text-primary: #F4F5F2;
-  --color-text-secondary: #A0A6A8;
-  --color-text-muted: #737B7E;
-  --color-text-inverse: #0B0D0F;
+  --color-text-primary-rgb: 244 245 242;
+  --color-text-secondary-rgb: 160 166 168;
+  --color-text-muted-rgb: 115 123 126;
+  --color-text-inverse-rgb: 11 13 15;
 
   /* Borders */
-  --color-border: #252A2D;
-  --color-border-strong: #343B3F;
+  --color-border-rgb: 37 42 45;
+  --color-border-strong-rgb: 52 59 63;
 
   /* Semantic states */
-  --color-success: #79D99A;
-  --color-warning: #F0C674;
-  --color-danger: #F07F7F;
-  --color-info: #83B9F2;
+  --color-success-rgb: 121 217 154;
+  --color-warning-rgb: 240 198 116;
+  --color-danger-rgb: 240 127 127;
+  --color-info-rgb: 131 185 242;
+
+  /* Derived CSS color vars */
+  --color-bg: rgb(var(--color-bg-rgb));
+  --color-surface: rgb(var(--color-surface-rgb));
+  --color-surface-raised: rgb(var(--color-surface-raised-rgb));
+  --color-surface-hover: rgb(var(--color-surface-hover-rgb));
+  --color-accent: rgb(var(--color-accent-rgb));
+  --color-accent-muted: rgb(var(--color-accent-muted-rgb));
+  --color-text-primary: rgb(var(--color-text-primary-rgb));
+  --color-text-secondary: rgb(var(--color-text-secondary-rgb));
+  --color-text-muted: rgb(var(--color-text-muted-rgb));
+  --color-text-inverse: rgb(var(--color-text-inverse-rgb));
+  --color-border: rgb(var(--color-border-rgb));
+  --color-border-strong: rgb(var(--color-border-strong-rgb));
+  --color-success: rgb(var(--color-success-rgb));
+  --color-warning: rgb(var(--color-warning-rgb));
+  --color-danger: rgb(var(--color-danger-rgb));
+  --color-info: rgb(var(--color-info-rgb));
 
   /* Shape */
   --radius-sm: 8px;
@@ -56,13 +75,62 @@
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-*, *::before, *::after {
+.light,
+html.light {
+  /* Crisp Light Surfaces */
+  --color-bg-rgb: 248 249 250;
+  --color-surface-rgb: 255 255 255;
+  --color-surface-raised-rgb: 241 243 245;
+  --color-surface-hover-rgb: 233 236 239;
+
+  /* High contrast brand accent in light mode */
+  --color-accent-rgb: 22 163 74;
+  --color-accent-muted-rgb: 21 128 61;
+  --color-accent-soft: rgba(22, 163, 74, 0.12);
+
+  /* Text */
+  --color-text-primary-rgb: 17 24 39;
+  --color-text-secondary-rgb: 75 85 99;
+  --color-text-muted-rgb: 107 114 128;
+  --color-text-inverse-rgb: 255 255 255;
+
+  /* Borders */
+  --color-border-rgb: 229 231 235;
+  --color-border-strong-rgb: 209 213 219;
+
+  /* Semantic states */
+  --color-success-rgb: 22 163 74;
+  --color-warning-rgb: 217 119 6;
+  --color-danger-rgb: 220 38 38;
+  --color-info-rgb: 37 99 235;
+
+  /* Derived CSS color vars */
+  --color-bg: rgb(var(--color-bg-rgb));
+  --color-surface: rgb(var(--color-surface-rgb));
+  --color-surface-raised: rgb(var(--color-surface-raised-rgb));
+  --color-surface-hover: rgb(var(--color-surface-hover-rgb));
+  --color-accent: rgb(var(--color-accent-rgb));
+  --color-accent-muted: rgb(var(--color-accent-muted-rgb));
+  --color-text-primary: rgb(var(--color-text-primary-rgb));
+  --color-text-secondary: rgb(var(--color-text-secondary-rgb));
+  --color-text-muted: rgb(var(--color-text-muted-rgb));
+  --color-text-inverse: rgb(var(--color-text-inverse-rgb));
+  --color-border: rgb(var(--color-border-rgb));
+  --color-border-strong: rgb(var(--color-border-strong-rgb));
+  --color-success: rgb(var(--color-success-rgb));
+  --color-warning: rgb(var(--color-warning-rgb));
+  --color-danger: rgb(var(--color-danger-rgb));
+  --color-info: rgb(var(--color-info-rgb));
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
 
 body {
+  margin: 0;
   background-color: var(--color-bg);
   color: var(--color-text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -72,10 +140,17 @@ body {
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
   overflow-x: hidden;
-  background-image: 
+  background-image:
     radial-gradient(ellipse 60% 40% at 50% -10%, rgba(198, 243, 106, 0.04) 0%, transparent 70%),
     radial-gradient(ellipse 40% 30% at 85% 60%, rgba(131, 185, 242, 0.02) 0%, transparent 60%);
   background-attachment: fixed;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+
+html.light body {
+  background-image:
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(22, 163, 74, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 30% at 85% 60%, rgba(37, 99, 235, 0.02) 0%, transparent 60%);
 }
 
 /* Tabular Numerals across balances, dates, prices, counts, and hashes */
@@ -142,21 +217,35 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   }
 }
 
-/* Scrollbar */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: var(--color-bg);
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius-pill);
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--color-accent-muted);
 }
+
+/* Reduced Motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 
 /* Reduced Motion preference */
 @media (prefers-reduced-motion: reduce) {

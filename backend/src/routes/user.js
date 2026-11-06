@@ -14,6 +14,9 @@ const formatUserResponse = (user) => ({
   username: user.username || null,
   walletAddress: user.walletAddress || null,
   walletConnectedAt: user.walletConnectedAt || null,
+  subscriptionFee: user.subscriptionFee ?? 0.001,
+  followersCount: user.followersCount ?? 0,
+  followingCount: user.followingCount ?? 0,
   bio: user.bio || null,
   avatarUrl: user.avatarUrl || null,
   verificationLevel: user.verificationLevel,
@@ -39,7 +42,7 @@ router.get('/profile', async (req, res) => {
 
 // PUT /api/user/profile
 router.put('/profile', async (req, res) => {
-  const { username, bio, avatarUrl } = req.body;
+  const { username, bio, avatarUrl, subscriptionFee } = req.body;
 
   try {
     const user = await User.findByIdAndUpdate(
@@ -49,6 +52,9 @@ router.put('/profile', async (req, res) => {
           ...(username !== undefined && { username: username.trim() }),
           ...(bio !== undefined && { bio: bio.trim() }),
           ...(avatarUrl !== undefined && { avatarUrl }),
+          ...(subscriptionFee !== undefined && !isNaN(Number(subscriptionFee)) && {
+            subscriptionFee: Math.max(0, Number(subscriptionFee)),
+          }),
         },
       },
       { new: true }
@@ -62,6 +68,38 @@ router.put('/profile', async (req, res) => {
   } catch (error) {
     console.error('Update profile error:', error.message);
     return res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// PUT /api/user/subscription-fee - Update leader subscription fee
+router.put('/subscription-fee', async (req, res) => {
+  const { fee } = req.body;
+  const numFee = Number(fee);
+
+  if (isNaN(numFee) || numFee < 0) {
+    return res.status(400).json({ error: 'Valid subscription fee in ETH is required' });
+  }
+
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: { subscriptionFee: numFee } },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Subscription fee updated',
+      subscriptionFee: user.subscriptionFee,
+      user: formatUserResponse(user),
+    });
+  } catch (error) {
+    console.error('Update subscription fee error:', error.message);
+    return res.status(500).json({ error: 'Failed to update subscription fee' });
   }
 });
 
@@ -149,6 +187,9 @@ router.get('/stats', async (req, res) => {
 
     return res.json({
       loginCount: user.loginCount,
+      followersCount: user.followersCount ?? 0,
+      followingCount: user.followingCount ?? 0,
+      subscriptionFee: user.subscriptionFee ?? 0.001,
       createdAt: user.createdAt,
       lastLogin: user.lastLogin,
       verificationLevel: user.verificationLevel,

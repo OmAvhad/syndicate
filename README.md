@@ -1,6 +1,7 @@
-# 🌍 SyndicateCopy & WorldAuth — ETHMumbai Hackathon
+# 🛡️ Syndicate — Zero-Knowledge Copy Trading Protocol
 
-A privacy-preserving, zero-link copy trading protocol and authentication system powered by **World ID**, **Definitive Flash**, **Kohaku / Railgun**, and **Ethereum Sepolia**.
+> **Copy a trader's moves without broadcasting your capital.**  
+> Built with **World ID (zk-SNARKs)**, **Kohaku (Railgun Shielded Pool)**, **Definitive Flash**, and **Arkiv**.
 
 ---
 
@@ -8,151 +9,148 @@ A privacy-preserving, zero-link copy trading protocol and authentication system 
 
 Direct link: **[`http://localhost:5173/flash-trade`](http://localhost:5173/flash-trade)**
 
-For ETHGlobal Mumbai hackathon evaluation, the **Flash Trade Terminal** lets you simulate and execute live onchain trades on Ethereum Sepolia using preloaded burner credentials without needing authentication:
+For ETHGlobal Mumbai hackathon evaluation, the **Flash Trade Terminal** lets you simulate and execute live onchain trades on Ethereum Sepolia and Base Mainnet using preloaded burner credentials without needing authentication:
 - **Bracket Orders** (Entry + Take-Profit + Stop-Loss in 1 signed intent)
 - **TWAP Orders** (Anti-frontrunning order slicing for followers)
-- **Live Ethereum Sepolia WETH execution & EIP-712 Intent Signing**
+- **Two-Leg Atomic Onchain Swaps** (USDC $\leftrightarrow$ WETH with FlashTradePool Vault)
 - **Interactive Price Trigger Engine & Onchain Exit Settlement** (Bull $3,350 & Bear $2,800)
-- **Live JSON Transaction & Protocol Payload Inspector**
+- **Production Mode: Definitive Flash on Base Mainnet** (Sub-second execution, $0 gas EIP-712 offchain signatures)
+- **Live JSON Transaction & Protocol Payload Inspector** (EIP-712, Arkiv commitments, EVM calldata)
 
 📖 **Read the Full Technical Documentation & Architecture FAQ:** [FLASH_TRADE_DOCS.md](./FLASH_TRADE_DOCS.md)
 
 ---
 
-## Stack
+## 🛠️ Technology Stack
 
-| Layer | Tech |
-|-------|------|
-| Frontend | React 19 + Vite + TypeScript + viem |
-| Execution Engine | Definitive Flash Advanced Orders (Bracket, TWAP, Limit) |
-| Privacy Layer | Kohaku / Railgun Privacy Pool on Ethereum Sepolia |
-| Onchain Network | Ethereum Sepolia Testnet (Chain ID `11155111`) |
-| Styling | Tailwind CSS + CRED-inspired Design System |
-| Auth SDK | `@worldcoin/idkit` (World ID v4) |
-| Backend | Node.js + Express (ESM) |
-| Database | MongoDB Atlas (Mongoose) |
-| Auth Tokens | JWT (7-day expiry) |
+| Layer | Technology | Details |
+|---|---|---|
+| **Frontend Web Desk** | React 19 + Vite + TypeScript + Tailwind | Leader execution terminal, performance analytics |
+| **Follower Mobile App** | React Native + Expo SDK 58 | 1-tap World ID login, shielded balance, copy modal |
+| **Execution Engine** | Definitive Flash Advanced Orders | Bracket orders (TP + SL), TWAP, RFQ solver relay |
+| **Privacy Layer** | Kohaku / Railgun Shielded Pool | Zero-link anonymous burner funding on Ethereum Sepolia |
+| **Onchain Networks** | Ethereum Sepolia (L1) & Base Mainnet (L2) | Chain IDs: `11155111` (Privacy/Dev) & `8453` (Prod) |
+| **Data Anchoring** | Arkiv Protocol | Decentralized 30-day follower relationship storage |
+| **Identity Verification** | World ID v4 (`@worldcoin/idkit`) | Orb / Device zk-SNARK humanness verification |
+| **Backend & Relayer** | Node.js + Express (ESM) | WebSocket real-time trade signals, live on Render |
+| **Database** | MongoDB Atlas (Mongoose) | User profiles, nullifier mapping, trade state |
 
-## Project Structure
+---
+
+## ⚡ The Problem
+
+* **MEV & Front-Running:** Traditional on-chain copy-trading publicly broadcasts follower wallet addresses, making followers easy targets for sandwich bots and front-runners.
+* **Alpha Degradation:** Elite traders cannot monetize their strategies without exposing their wallet history and trade timing to copycat scrapers.
+* **Sybil & Bot Farms:** Fake accounts and automated bots manipulate leaderboards and distort social copy-trading metrics.
+
+---
+
+## 💡 The Solution
+
+1. **Shielded Pool Execution:** Follower funds reside in a private **Kohaku Railgun shielded pool**. Moves execute via ZK-relayer batches with zero public balance linkage.
+2. **Definitive Flash Execution:** Leaders and followers execute advanced **Bracket Orders** (Take-Profit + Stop-Loss) and **TWAP split orders** with $0 gas offchain EIP-712 intent signatures.
+3. **Sybil-Resistant Identity:** Followers authenticate via **World ID** zero-knowledge proofs (1 Human = 1 Seat) with zero personal data or KYC.
+4. **Decentralized Relationship Anchoring:** Follower subscriptions are recorded on **Arkiv** with cryptographic 30-day TTLs.
+5. **Separation of Concerns:**
+   * **Web Desk (`frontend`):** Designed for **Leaders** — detailed execution, performance charts, and fee management.
+   * **Mobile App (`app`):** Designed for **Followers** — 1-tap World ID login, shielded balance control, and mobile copy allocation.
+
+---
+
+## 🏛️ System Architecture
+
+```mermaid
+flowchart TD
+    subgraph Clients["Clients"]
+        LeaderWeb["Trader / Leader Desk\n(Web: React + Vite)"]
+        FollowerApp["Follower Portal\n(Mobile: React Native + Expo)"]
+    end
+
+    subgraph AuthLayer["Privacy & Identity"]
+        WorldID["World ID (Orb / Device)\nzk-SNARK Nullifier Hash"]
+    end
+
+    subgraph BackendLayer["Relayer & Core API"]
+        Backend["Node.js Express Relayer\n(Live on Render)"]
+        MongoDB[("MongoDB Atlas\nProfiles & States")]
+        Arkiv[("Arkiv Data Layer\n30-Day Follow TTL")]
+    end
+
+    subgraph OnChain["On-Chain Privacy & Execution Layer"]
+        ShieldedPool["Kohaku Railgun Shielded Pool\n(Ethereum Sepolia)"]
+        FlashEngine["Definitive Flash Engine\n(Base Mainnet & Sepolia)"]
+        RelayerExec["Zero-Knowledge Batch Execution"]
+    end
+
+    LeaderWeb -->|"1. Initiates Trade & Sets Fee"| Backend
+    LeaderWeb -->|"2. Signs EIP-712 Flash Orders"| FlashEngine
+    FollowerApp -->|"3. Proves Humanness"| WorldID
+    WorldID -->|"4. Verifies ZK Proof"| Backend
+    Backend -->|"5. Stores Follower Link"| Arkiv
+    Backend -->|"6. Syncs State"| MongoDB
+    FollowerApp -->|"7. Deposits into Pool"| ShieldedPool
+    Backend -->|"8. Dispatches Relayed Trades"| RelayerExec
+    RelayerExec -->|"9. Executes Without Exposing Follower"| ShieldedPool
+```
+
+---
+
+## 📂 Repository Structure
 
 ```
-world-id-auth/
-├── .env                        # Root env (MongoDB, APP_ID, RP_ID, JWT_SECRET)
-├── backend/
-│   └── src/
-│       ├── index.js            # Express server :3001
-│       ├── db.js               # MongoDB connection
-│       ├── models/User.js      # User schema (nullifierHash as ID)
-│       ├── middleware/auth.js  # JWT middleware
-│       └── routes/
-│           ├── auth.js         # POST /api/auth/verify
-│           └── user.js         # GET/PUT /api/user/profile, GET /api/user/stats
-└── frontend/
-    └── src/
-        ├── pages/
-        │   ├── LandingPage.tsx  # IDKit widget, animated hero
-        │   ├── Dashboard.tsx    # Stats, nullifier hash display
-        │   └── ProfilePage.tsx  # Edit display name, username, bio
-        ├── components/
-        │   ├── Navbar.tsx
-        │   ├── WorldIDButton.tsx
-        │   └── ui/              # Button, Card, Input, Badge, Textarea
-        ├── context/AuthContext.tsx
-        └── lib/
-            ├── api.ts           # Axios client with JWT interceptor
-            └── utils.ts         # cn(), formatDate(), truncateHash()
+syndicate/
+├── app/               # 📱 Follower Mobile Client (React Native + Expo SDK 58)
+│   ├── src/
+│   │   ├── api/       # Client communicating with live Render backend
+│   │   ├── context/   # AuthContext, TradeContext, ThemeContext
+│   │   ├── screens/   # Minimalist Login, Follower Dashboard, Discover, Profile
+│   │   └── components/# ShieldedBalanceCard, CopyModal (Action Sheet)
+│   └── App.tsx        # Dynamic safe-area navigator with Light/Dark mode
+│
+├── frontend/          # 💻 Leader / Trader Web Desk (React 19 + Vite + Tailwind)
+│   ├── src/
+│   │   ├── pages/     # Landing, Dashboard, Explore Leaders, FlashTradePage, Profile
+│   │   ├── components/# Navbar, WalletConnectButton, WorldIDButton
+│   │   └── lib/       # Arkiv network & Viem Base / Sepolia helpers
+│   └── index.html
+│
+└── backend/           # ⚙️ Relayer & Core API (Node.js ESM + Express)
+    ├── src/
+    │   ├── routes/    # /api/auth, /api/user, /api/explore, /api/follow, /api/trade
+    │   ├── services/  # arkiv.js, tradeCrypto.js
+    │   └── models/    # User.js, Follow.js, Trade.js, TradeSignal.js
+    └── render.yaml    # Production deployment blueprint for Render
 ```
 
-## Running Locally
+---
 
-### 1. Install dependencies
+## 🚀 Quick Start
 
+### 1. Backend (`syndicate/backend`)
 ```bash
-# Backend
-cd backend && npm install
-
-# Frontend
-cd ../frontend && npm install
+cd backend
+npm install
+npm run dev    # Local: http://localhost:3001 | Production: Render
 ```
 
-### 2. Start the backend
-
+### 2. Leader Web Desk (`syndicate/frontend`)
 ```bash
-cd backend && npm run dev
-# → http://localhost:3001
+cd frontend
+npm install
+npm run dev    # Opens at http://localhost:5173
 ```
 
-### 3. Start the frontend
-
+### 3. Follower Mobile App (`syndicate/app`)
 ```bash
-cd frontend && npm run dev
-# → http://localhost:5173
+cd app
+npm install
+npx expo start # Scan QR code with Expo Go or press 'w' for web view
 ```
 
-## Authentication Flow
+---
 
-```
-User clicks "Verify with World ID"
-        ↓
-IDKitWidget opens (World ID app scan)
-        ↓
-handleVerify(proof) → POST /api/auth/verify
-        ↓
-Backend calls developer.worldcoin.org/api/v2/verify/{APP_ID}
-        ↓
-Proof verified → upsert User in MongoDB → return JWT
-        ↓
-onSuccess() → store token in localStorage → redirect to Dashboard
-```
+## 📜 Production Endpoints
 
-## API Endpoints
-
-### Auth
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/auth/verify` | Verify World ID proof, return JWT + user |
-
-### User (JWT required)
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/user/profile` | Get current user profile |
-| `PUT` | `/api/user/profile` | Update username, bio |
-| `POST` | `/api/user/wallet` | Connect & store MetaMask wallet address (public key) |
-| `DELETE` | `/api/user/wallet` | Disconnect wallet address |
-| `GET` | `/api/user/stats` | Get login stats |
-
-## Environment Variables
-
-### Root `.env`
-```env
-MONGODB_URI=mongodb+srv://...
-APP_ID=app_...
-RP_ID=rp_...
-SIGNER_ADDRESS=0x...
-JWT_SECRET=your-secret
-```
-
-### `frontend/.env`
-```env
-VITE_APP_ID=app_...
-VITE_RP_ID=rp_...
-VITE_API_URL=http://localhost:3001
-```
-
-## User Model
-
-```js
-{
-  nullifierHash: String,    // World ID identifier (unique, app-scoped)
-  username: String,         // Optional, user-set
-  walletAddress: String,    // Connected MetaMask Ethereum address (public key)
-  walletConnectedAt: Date,  // Timestamp of wallet linking
-  bio: String,              // Optional
-  avatarUrl: String,        // Optional
-  verificationLevel: String, // 'orb' | 'device'
-  loginCount: Number,       // Incremented each login
-  createdAt: Date,
-  lastLogin: Date,
-}
-```
-
+* **Backend API (Render):** `https://syndicate-backend-n3p9.onrender.com`
+* **Health Check:** `https://syndicate-backend-n3p9.onrender.com/health`
+* **World ID Auth Context:** `https://syndicate-backend-n3p9.onrender.com/api/auth/rp-context`

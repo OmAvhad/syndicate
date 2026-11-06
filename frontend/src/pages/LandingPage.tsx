@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import WorldIDButton from '@/components/WorldIDButton'
-import { ShieldCheck, Fingerprint, Lock, Cpu, EyeOff, KeyRound, Check, Zap, ArrowRight } from 'lucide-react'
+import ThemeToggle from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/Button'
+import { ShieldCheck, Fingerprint, Lock, Cpu, EyeOff, KeyRound, Check, Zap, ArrowRight } from 'lucide-react'
 
 export default function LandingPage() {
   const { login } = useAuth()
@@ -90,6 +91,7 @@ export default function LandingPage() {
               <span className="w-1.5 h-1.5 rounded-full bg-semantic-success shadow-[0_0_8px_rgba(121,217,154,0.6)]" />
               <span>World ID 4.0 Active</span>
             </div>
+            <ThemeToggle variant="compact" />
           </div>
         </div>
       </header>

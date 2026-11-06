@@ -1,9 +1,13 @@
 import './env.js';
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import connectDB from './db.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
+import followRoutes from './routes/follow.js';
+import tradeRoutes from './routes/trade.js';
+import { initWebSocketServer } from './websocket.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -12,15 +16,27 @@ const PORT = process.env.PORT || 3001;
 connectDB();
 
 // Middleware
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser requests (mobile apps, curl, etc.) or local dev origins
+    if (!origin || process.env.NODE_ENV !== 'production' || origin.includes('localhost') || origin.includes('render.com')) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api', followRoutes);
+app.use('/api/trades', tradeRoutes);
 
 // Health check
-app.get('/health', (req, res) => {
+app.get(['/health', '/healthz'], (req, res) => {
   res.json({
     status: 'ok',
     environment: process.env.WORLDID_ENV || 'staging',
@@ -28,7 +44,11 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Create HTTP server & attach WebSocket server
+const server = http.createServer(app);
+initWebSocketServer(server);
+
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Backend running on http://localhost:${PORT} (WorldID env: ${process.env.WORLDID_ENV || 'staging'})`);
+server.listen(PORT, () => {
+  console.log(`🚀 Backend running on port ${PORT} (WorldID env: ${process.env.WORLDID_ENV || 'staging'}, WebSockets enabled on /ws)`);
 });

@@ -8,32 +8,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "#0B0D0F",
+        bg: "rgb(var(--color-bg-rgb) / <alpha-value>)",
         surface: {
-          DEFAULT: "#141719",
-          raised: "#1A1E21",
-          hover: "#202629",
+          DEFAULT: "rgb(var(--color-surface-rgb) / <alpha-value>)",
+          raised: "rgb(var(--color-surface-raised-rgb) / <alpha-value>)",
+          hover: "rgb(var(--color-surface-hover-rgb) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "#C6F36A",
-          muted: "#9FCA4F",
-          soft: "rgba(198, 243, 106, 0.12)",
+          DEFAULT: "rgb(var(--color-accent-rgb) / <alpha-value>)",
+          muted: "rgb(var(--color-accent-muted-rgb) / <alpha-value>)",
+          soft: "var(--color-accent-soft)",
         },
         text: {
-          primary: "#F4F5F2",
-          secondary: "#A0A6A8",
-          muted: "#737B7E",
-          inverse: "#0B0D0F",
+          primary: "rgb(var(--color-text-primary-rgb) / <alpha-value>)",
+          secondary: "rgb(var(--color-text-secondary-rgb) / <alpha-value>)",
+          muted: "rgb(var(--color-text-muted-rgb) / <alpha-value>)",
+          inverse: "rgb(var(--color-text-inverse-rgb) / <alpha-value>)",
         },
         border: {
-          DEFAULT: "#252A2D",
-          strong: "#343B3F",
+          DEFAULT: "rgb(var(--color-border-rgb) / <alpha-value>)",
+          strong: "rgb(var(--color-border-strong-rgb) / <alpha-value>)",
         },
         semantic: {
-          success: "#79D99A",
-          warning: "#F0C674",
-          danger: "#F07F7F",
-          info: "#83B9F2",
+          success: "rgb(var(--color-success-rgb) / <alpha-value>)",
+          warning: "rgb(var(--color-warning-rgb) / <alpha-value>)",
+          danger: "rgb(var(--color-danger-rgb) / <alpha-value>)",
+          info: "rgb(var(--color-info-rgb) / <alpha-value>)",
         },
       },
       borderRadius: {
@@ -66,11 +66,15 @@ export default {
         ],
         mono: [
           "JetBrains Mono",
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
+          "SF Mono",
+          "Fira Code",
           "monospace",
         ],
+      },
+      boxShadow: {
+        glow: "0 0 24px rgba(198, 243, 106, 0.15)",
+        "glow-sm": "0 0 12px rgba(198, 243, 106, 0.10)",
+        card: "0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3)",
       },
       transitionDuration: {
         fast: "160ms",
@@ -79,20 +83,6 @@ export default {
       },
       transitionTimingFunction: {
         standard: "cubic-bezier(0.22, 1, 0.36, 1)",
-      },
-      animation: {
-        fadeIn: "fadeIn 260ms cubic-bezier(0.22, 1, 0.36, 1)",
-        slideUp: "slideUp 320ms cubic-bezier(0.22, 1, 0.36, 1)",
-      },
-      keyframes: {
-        fadeIn: {
-          "0%": { opacity: "0", transform: "translateY(4px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        slideUp: {
-          "0%": { transform: "translateY(16px)", opacity: "0" },
-          "100%": { transform: "translateY(0)", opacity: "1" },
-        },
       },
     },
   },
