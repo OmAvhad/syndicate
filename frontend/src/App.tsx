@@ -1,11 +1,14 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { SignalProvider } from './context/SignalContext'
 import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import ProfilePage from './pages/ProfilePage'
 import ExplorePage from './pages/ExplorePage'
+import LeaderTerminalPage from './pages/LeaderTerminalPage'
 import Navbar from './components/Navbar'
+import TradeSignalBanner from './components/TradeSignalBanner'
 
 function AppRoutes() {
   const { isAuthenticated, isLoading } = useAuth()
@@ -26,11 +29,16 @@ function AppRoutes() {
   return (
     <div className="min-h-screen bg-bg text-text-primary flex flex-col selection:bg-accent-soft selection:text-accent">
       {isAuthenticated && <Navbar />}
+      {isAuthenticated && <TradeSignalBanner />}
       <div className="flex-1 flex flex-col">
         <Routes>
           <Route
             path="/"
             element={isAuthenticated ? <Dashboard /> : <LandingPage />}
+          />
+          <Route
+            path="/trade"
+            element={isAuthenticated ? <LeaderTerminalPage /> : <Navigate to="/" replace />}
           />
           <Route
             path="/explore"
@@ -51,9 +59,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <SignalProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </SignalProvider>
       </AuthProvider>
     </ThemeProvider>
   )

@@ -1,10 +1,13 @@
 import './env.js';
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import connectDB from './db.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import followRoutes from './routes/follow.js';
+import tradeRoutes from './routes/trade.js';
+import { initWebSocketServer } from './websocket.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,6 +33,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api', followRoutes);
+app.use('/api/trades', tradeRoutes);
 
 // Health check
 app.get(['/health', '/healthz'], (req, res) => {
@@ -40,7 +44,11 @@ app.get(['/health', '/healthz'], (req, res) => {
   });
 });
 
+// Create HTTP server & attach WebSocket server
+const server = http.createServer(app);
+initWebSocketServer(server);
+
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Backend running on port ${PORT} (WorldID env: ${process.env.WORLDID_ENV || 'staging'})`);
+server.listen(PORT, () => {
+  console.log(`🚀 Backend running on port ${PORT} (WorldID env: ${process.env.WORLDID_ENV || 'staging'}, WebSockets enabled on /ws)`);
 });

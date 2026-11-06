@@ -20,6 +20,8 @@ import {
   Coins,
   Database,
   ArrowRight,
+  TrendingUp,
+  Radio,
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -134,10 +136,17 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Link
+                to="/trade"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-all shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
+              >
+                <TrendingUp className="w-3.5 h-3.5 stroke-[2.2]" />
+                Trade Terminal
+              </Link>
               <Link
                 to="/explore"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-all shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs font-semibold text-text-primary transition-colors duration-fast"
               >
                 <Compass className="w-3.5 h-3.5 stroke-[2.2]" />
                 Explore Leaders

@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
+import { useSignals } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import ThemeToggle from '@/components/ThemeToggle'
-import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass } from 'lucide-react'
+import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio } from 'lucide-react'
 
 export default function Navbar() {
   const { user, logout } = useAuth()
+  const { activeSignalCount } = useSignals()
   const navigate = useNavigate()
   const location = useLocation()
   const [dropdownOpen, setDropdownOpen] = useState(false)
@@ -60,6 +62,25 @@ export default function Navbar() {
             <Compass className="w-3.5 h-3.5" />
             Explore
           </Link>
+
+          <Link
+            to="/trade"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/trade'
+              ? 'bg-accent text-text-inverse shadow-[0_0_12px_rgba(198,243,106,0.2)]'
+              : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+              }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 stroke-[2.2]" />
+            <span>Trade Terminal</span>
+          </Link>
+
+          {/* Active Signals Live Indicator */}
+          {activeSignalCount > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-pill bg-accent-soft border border-accent/40 text-xs text-accent animate-pulse font-semibold">
+              <Radio className="w-3 h-3 text-accent" />
+              <span>{activeSignalCount} Signal{activeSignalCount > 1 ? 's' : ''} Live</span>
+            </div>
+          )}
 
           {/* World ID Verified Pill */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-surface border border-border text-xs text-text-secondary">
@@ -178,6 +199,19 @@ export default function Navbar() {
           >
             <Compass className="w-4 h-4 text-accent" />
             Explore Leaders
+          </Link>
+          <Link
+            to="/trade"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
+          >
+            <TrendingUp className="w-4 h-4 text-accent" />
+            <span>Trade Terminal</span>
+            {activeSignalCount > 0 && (
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded-pill bg-accent text-text-inverse font-bold">
+                {activeSignalCount} Live
+              </span>
+            )}
           </Link>
           <Link
             to="/profile"
