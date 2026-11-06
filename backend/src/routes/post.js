@@ -1,28 +1,27 @@
 import express from 'express';
-import authMiddleware from '../middleware/auth.js';
+import authMiddleware, { optionalAuthMiddleware } from '../middleware/auth.js';
 import User from '../models/User.js';
 import Trade from '../models/Trade.js';
 import TradePost from '../models/TradePost.js';
 import SocialFollow from '../models/SocialFollow.js';
 
 const router = express.Router();
-router.use(authMiddleware);
 
 /**
  * GET /api/posts
  * Fetch the social trade posts feed.
  * filter: 'following' (posts from followed leaders) or 'global' (all posts)
  */
-router.get('/', async (req, res) => {
+router.get('/', optionalAuthMiddleware, async (req, res) => {
   try {
-    const currentUserId = req.user.userId;
+    const currentUserId = req.user?.userId;
     const { filter = 'global', tag, limit = 30, page = 0 } = req.query;
     const maxLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 30));
     const skip = Math.max(0, parseInt(page, 10) || 0) * maxLimit;
 
     const query = {};
 
-    if (filter === 'following') {
+    if (filter === 'following' && currentUserId) {
       const myFollows = await SocialFollow.find({ followerId: currentUserId }).select('leaderId').lean();
       const leaderIds = myFollows.map((f) => f.leaderId);
       leaderIds.push(currentUserId); // Include own posts
@@ -42,7 +41,7 @@ router.get('/', async (req, res) => {
       .lean();
 
     const formatted = posts.map((post) => {
-      const isLiked = post.likes ? post.likes.some((id) => id.toString() === currentUserId.toString()) : false;
+      const isLiked = currentUserId && post.likes ? post.likes.some((id) => id.toString() === currentUserId.toString()) : false;
       return {
         id: post._id,
         content: post.content,
@@ -79,6 +78,9 @@ router.get('/', async (req, res) => {
     return res.status(500).json({ error: 'Failed to fetch social posts feed' });
   }
 });
+
+// Require authentication for post mutations (create, like, delete)
+router.use(authMiddleware);
 
 /**
  * POST /api/posts

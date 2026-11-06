@@ -371,3 +371,4 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
     </div>
   )
 }
+

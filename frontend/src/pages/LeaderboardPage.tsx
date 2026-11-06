@@ -113,7 +113,7 @@ export default function LeaderboardPage() {
       if (riskFilter !== 'ALL') {
         params.riskLevel = riskFilter
       }
-      const res = await api.get('/leaderboard', { params })
+      const res = await api.get('/api/leaderboard', { params })
       if (res.data?.success) {
         setLeaders(res.data.leaderboard || [])
       }
@@ -136,7 +136,7 @@ export default function LeaderboardPage() {
       setFollowLoading((prev) => ({ ...prev, [leaderId]: true }))
       if (leader.isFollowing) {
         // Unfollow
-        await api.delete(`/social/unfollow/${leaderId}`)
+        await api.delete(`/api/social/unfollow/${leaderId}`)
         setLeaders((prev) =>
           prev.map((l) =>
             l.id === leaderId
@@ -146,7 +146,7 @@ export default function LeaderboardPage() {
         )
       } else {
         // Follow
-        await api.post(`/social/follow/${leaderId}`)
+        await api.post(`/api/social/follow/${leaderId}`)
         setLeaders((prev) =>
           prev.map((l) =>
             l.id === leaderId ? { ...l, isFollowing: true, followersCount: l.followersCount + 1 } : l
@@ -186,7 +186,7 @@ export default function LeaderboardPage() {
 
       setSubTxHash(txHash)
 
-      const res = await api.post('/follow', {
+      const res = await api.post('/api/follow', {
         leaderId: subscribingLeader.id,
         transactionId: txHash,
       })

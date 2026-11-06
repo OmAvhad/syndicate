@@ -19,4 +19,24 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+export const optionalAuthMiddleware = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    req.user = null;
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const secret = process.env.JWT_SECRET || 'world-id-secret-key-2024';
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+  } catch (err) {
+    req.user = null;
+  }
+  next();
+};
+
 export default authMiddleware;

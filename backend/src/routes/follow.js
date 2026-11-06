@@ -1,5 +1,5 @@
 import express from 'express';
-import authMiddleware from '../middleware/auth.js';
+import authMiddleware, { optionalAuthMiddleware } from '../middleware/auth.js';
 import User from '../models/User.js';
 import Follow from '../models/Follow.js';
 import SocialFollow from '../models/SocialFollow.js';
@@ -8,16 +8,13 @@ import { recalculateLeaderStats, getLeaderEquityCurve } from '../services/statsC
 
 const router = express.Router();
 
-// Apply auth middleware to all routes
-router.use(authMiddleware);
-
 // GET /api/explore - List users available with filters (riskLevel, tag, tradingStyle, sort, search)
-router.get('/explore', async (req, res) => {
+router.get('/explore', optionalAuthMiddleware, async (req, res) => {
   try {
-    const currentUserId = req.user.userId;
+    const currentUserId = req.user?.userId;
     const { riskLevel, tag, tradingStyle, sort = 'followers', search } = req.query;
 
-    const query = { _id: { $ne: currentUserId } };
+    const query = currentUserId ? { _id: { $ne: currentUserId } } : {};
 
     if (riskLevel && ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE', 'DEGEN'].includes(riskLevel.toUpperCase())) {
       query.riskLevel = riskLevel.toUpperCase();
@@ -56,27 +53,29 @@ router.get('/explore', async (req, res) => {
       .lean();
 
     // Check paid subscriptions (30-day epoch on Base Sepolia / Arkiv)
-    const activeSubscriptions = await Follow.find({
-      followerId: currentUserId,
-      status: 'active',
-      expiresAt: { $gt: new Date() },
-    })
-      .select('leaderId expiresAt transactionId arkivEntityKey')
-      .lean();
-
     const activeSubscriptionMap = new Map();
-    activeSubscriptions.forEach((f) => {
-      activeSubscriptionMap.set(f.leaderId.toString(), f);
-    });
+    let socialFollowSet = new Set();
+    if (currentUserId) {
+      const [activeSubscriptions, socialFollows] = await Promise.all([
+        Follow.find({
+          followerId: currentUserId,
+          status: 'active',
+          expiresAt: { $gt: new Date() },
+        })
+          .select('leaderId expiresAt transactionId arkivEntityKey')
+          .lean(),
+        SocialFollow.find({
+          followerId: currentUserId,
+        })
+          .select('leaderId')
+          .lean(),
+      ]);
 
-    // Check free social follows
-    const socialFollows = await SocialFollow.find({
-      followerId: currentUserId,
-    })
-      .select('leaderId')
-      .lean();
-
-    const socialFollowSet = new Set(socialFollows.map((sf) => sf.leaderId.toString()));
+      activeSubscriptions.forEach((f) => {
+        activeSubscriptionMap.set(f.leaderId.toString(), f);
+      });
+      socialFollowSet = new Set(socialFollows.map((sf) => sf.leaderId.toString()));
+    }
 
     const exploreUsers = users.map((u) => {
       const subInfo = activeSubscriptionMap.get(u._id.toString());
@@ -123,7 +122,7 @@ router.get('/explore', async (req, res) => {
 });
 
 // GET /api/leaderboard - Ranked list of top traders with verification evidence
-router.get('/leaderboard', async (req, res) => {
+router.get('/leaderboard', optionalAuthMiddleware, async (req, res) => {
   try {
     const { sort = 'pnl', limit = 50, riskLevel } = req.query;
     const maxLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
@@ -145,16 +144,19 @@ router.get('/leaderboard', async (req, res) => {
       .limit(maxLimit)
       .lean();
 
-    const currentUserId = req.user.userId;
+    const currentUserId = req.user?.userId;
 
-    // Check current user's relationships
-    const [mySubs, mySocials] = await Promise.all([
-      Follow.find({ followerId: currentUserId, status: 'active', expiresAt: { $gt: new Date() } }).select('leaderId').lean(),
-      SocialFollow.find({ followerId: currentUserId }).select('leaderId').lean(),
-    ]);
-
-    const subSet = new Set(mySubs.map((s) => s.leaderId.toString()));
-    const socialSet = new Set(mySocials.map((s) => s.leaderId.toString()));
+    // Check current user's relationships if authenticated
+    let subSet = new Set();
+    let socialSet = new Set();
+    if (currentUserId) {
+      const [mySubs, mySocials] = await Promise.all([
+        Follow.find({ followerId: currentUserId, status: 'active', expiresAt: { $gt: new Date() } }).select('leaderId').lean(),
+        SocialFollow.find({ followerId: currentUserId }).select('leaderId').lean(),
+      ]);
+      subSet = new Set(mySubs.map((s) => s.leaderId.toString()));
+      socialSet = new Set(mySocials.map((s) => s.leaderId.toString()));
+    }
 
     const ranked = leaders.map((leader, index) => {
       // Tier calculation based on rank & PnL
@@ -187,7 +189,7 @@ router.get('/leaderboard', async (req, res) => {
         },
         isSubscribed: subSet.has(leader._id.toString()),
         isFollowing: socialSet.has(leader._id.toString()),
-        isSelf: leader._id.toString() === currentUserId.toString(),
+        isSelf: currentUserId ? leader._id.toString() === currentUserId.toString() : false,
       };
     });
 
@@ -203,7 +205,7 @@ router.get('/leaderboard', async (req, res) => {
 });
 
 // GET /api/leaderboard/:leaderId/chart - Returns historical equity curve snapshots
-router.get('/leaderboard/:leaderId/chart', async (req, res) => {
+router.get('/leaderboard/:leaderId/chart', optionalAuthMiddleware, async (req, res) => {
   try {
     const curve = await getLeaderEquityCurve(req.params.leaderId, 30);
     return res.json({ success: true, data: curve });
@@ -213,7 +215,7 @@ router.get('/leaderboard/:leaderId/chart', async (req, res) => {
 });
 
 // POST /api/social/follow/:leaderId - 1-Click Free Social Follow
-router.post('/social/follow/:leaderId', async (req, res) => {
+router.post('/social/follow/:leaderId', authMiddleware, async (req, res) => {
   try {
     const followerId = req.user.userId;
     const { leaderId } = req.params;
@@ -251,7 +253,7 @@ router.post('/social/follow/:leaderId', async (req, res) => {
 });
 
 // DELETE /api/social/unfollow/:leaderId - 1-Click Free Social Unfollow
-router.delete('/social/unfollow/:leaderId', async (req, res) => {
+router.delete('/social/unfollow/:leaderId', authMiddleware, async (req, res) => {
   try {
     const followerId = req.user.userId;
     const { leaderId } = req.params;
@@ -280,7 +282,7 @@ router.delete('/social/unfollow/:leaderId', async (req, res) => {
 });
 
 // POST /api/follow - Follow a leader, store in Arkiv with 30-day TTL, update MongoDB counts
-router.post('/follow', async (req, res) => {
+router.post('/follow', authMiddleware, async (req, res) => {
   const { leaderId, transactionId } = req.body;
   const followerId = req.user.userId;
 
@@ -393,7 +395,7 @@ router.post('/follow', async (req, res) => {
 });
 
 // POST /api/unfollow - Unfollow a leader and decrement MongoDB counts
-router.post('/unfollow', async (req, res) => {
+router.post('/unfollow', authMiddleware, async (req, res) => {
   const { leaderId } = req.body;
   const followerId = req.user.userId;
 
@@ -444,7 +446,7 @@ router.post('/unfollow', async (req, res) => {
 });
 
 // GET /api/following - Get leaders currently followed by authenticated user
-router.get('/following', async (req, res) => {
+router.get('/following', authMiddleware, async (req, res) => {
   try {
     const follows = await Follow.find({
       followerId: req.user.userId,
@@ -465,7 +467,7 @@ router.get('/following', async (req, res) => {
 });
 
 // GET /api/followers - Get followers currently following authenticated user (leader)
-router.get('/followers', async (req, res) => {
+router.get('/followers', authMiddleware, async (req, res) => {
   try {
     const followers = await Follow.find({
       leaderId: req.user.userId,

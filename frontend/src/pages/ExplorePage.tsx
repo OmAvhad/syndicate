@@ -184,14 +184,14 @@ export default function ExplorePage() {
     try {
       setSocialLoading((prev) => ({ ...prev, [leaderId]: true }))
       if (leader.isFollowing) {
-        await api.delete(`/social/unfollow/${leaderId}`)
+        await api.delete(`/api/social/unfollow/${leaderId}`)
         setUsers((prev) =>
           prev.map((u) =>
             u.id === leaderId ? { ...u, isFollowing: false, followersCount: Math.max(0, u.followersCount - 1) } : u
           )
         )
       } else {
-        await api.post(`/social/follow/${leaderId}`)
+        await api.post(`/api/social/follow/${leaderId}`)
         setUsers((prev) =>
           prev.map((u) =>
             u.id === leaderId ? { ...u, isFollowing: true, followersCount: u.followersCount + 1 } : u

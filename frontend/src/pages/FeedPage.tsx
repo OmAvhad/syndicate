@@ -86,7 +86,7 @@ export default function FeedPage() {
     try {
       setLoading(true)
       setError(null)
-      const res = await api.get('/posts', { params: { filter } })
+      const res = await api.get('/api/posts', { params: { filter } })
       if (res.data?.success) {
         setPosts(res.data.posts || [])
       }
@@ -101,7 +101,7 @@ export default function FeedPage() {
   // Fetch recent trades for post attachment
   const fetchRecentTrades = async () => {
     try {
-      const res = await api.get('/trades/history?page=0')
+      const res = await api.get('/api/trades/history?page=0')
       if (res.data?.success) {
         setRecentTrades(res.data.trades?.slice(0, 5) || [])
       }
@@ -136,7 +136,7 @@ export default function FeedPage() {
         payload.tradeId = selectedTradeId
       }
 
-      const res = await api.post('/posts', payload)
+      const res = await api.post('/api/posts', payload)
       if (res.data?.success) {
         setContent('')
         setTagsInput('')
@@ -170,7 +170,7 @@ export default function FeedPage() {
           return p
         })
       )
-      await api.post(`/posts/${postId}/like`)
+      await api.post(`/api/posts/${postId}/like`)
     } catch (err) {
       console.error('Like error:', err)
       // Revert if error
