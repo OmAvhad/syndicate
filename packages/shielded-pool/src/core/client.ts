@@ -76,7 +76,7 @@ export class ShieldedPoolClient {
 
     this.plugin = await createRailgunPlugin(host as any, {
       logLevel: 'Off',
-      subsquid: false, // Use direct RPC for reliable testnet sync
+      subsquid: true, // Use Subsquid indexer for fast multi-block sync
       poi: false,
       keyIndex: this.keyring.getKeyIndex(),
       bundler: bundlerConfig,

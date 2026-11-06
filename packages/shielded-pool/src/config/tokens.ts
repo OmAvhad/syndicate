@@ -18,13 +18,13 @@ export const SEPOLIA_TOKENS: Record<string, TokenConfig> = {
     name: 'Wrapped Ether',
     decimals: 18,
     isNative: false,
-    address: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
+    address: '0xfff9976782d46cc05630d1f6ebab18b2324d6b14',
   },
   USDC: {
     symbol: 'USDC',
     name: 'USD Coin (Testnet)',
     decimals: 6,
     isNative: false,
-    address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    address: '0x1c7d4b196cb0c7b01d743fbc6116a902379c7238',
   },
 };

@@ -13,16 +13,17 @@
 
 import 'dotenv/config';
 import path from 'path';
-import { config as loadEnv } from 'dotenv';
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import dotenv from 'dotenv';
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+
 import { createWalletClient, http, parseEther, formatEther } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
 import { ShieldedPool } from '../src/index.js';
 import { ShieldedKeyring } from '../src/core/identity.js';
-
-// Load root .env (contains SEPOLIA_PRIVATE_KEY, PIMLICO_API_KEY, DESTINATION_ADDRESS)
-loadEnv({ path: path.resolve(process.cwd(), '../../.env') });
-loadEnv({ path: path.resolve(process.cwd(), '.env') });
 
 // ── Validate env ──────────────────────────────────────────────────────────────
 
@@ -80,20 +81,20 @@ async function main() {
 
   // ── Check shielded balance ─────────────────────────────────────────────────
   console.log('\n⏳ Syncing shielded pool & checking balance...');
-  const wethBalance = await pool.getBalance('WETH');
-  console.log(`   Shielded WETH balance: ${wethBalance.formatted}`);
-  console.log(`   Notes: ${wethBalance.notes.length}`);
+  const ethBalance = await pool.getBalance('ETH');
+  console.log(`   Shielded ETH balance: ${ethBalance.formatted}`);
+  console.log(`   Notes: ${ethBalance.notes.length}`);
 
-  if (wethBalance.notes.length === 0) {
+  if (ethBalance.notes.length === 0) {
     console.error('\n❌ No shielded notes found. Run Journey #1 deposit first.');
     console.error('   npm run deposit:sepolia');
     process.exit(1);
   }
 
-  if (wethBalance.amount < UNSHIELD_AMOUNT) {
+  if (ethBalance.amount < UNSHIELD_AMOUNT) {
     console.error(`\n❌ Insufficient shielded balance.`);
-    console.error(`   Have: ${wethBalance.formatted}`);
-    console.error(`   Need: ${formatEther(UNSHIELD_AMOUNT)} WETH`);
+    console.error(`   Have: ${ethBalance.formatted}`);
+    console.error(`   Need: ${formatEther(UNSHIELD_AMOUNT)} ETH`);
     process.exit(1);
   }
 
@@ -102,7 +103,7 @@ async function main() {
   console.log('   (Leader EOA will NOT appear as on-chain sender)\n');
 
   const result = await pool.unshield({
-    assetSymbol: 'WETH',
+    assetSymbol: 'ETH',
     amount: UNSHIELD_AMOUNT,
     destinationAddress: DESTINATION_ADDRESS!,
   });

@@ -16,20 +16,9 @@ async function main() {
   console.log('       Ethereum Sepolia (11155111) Live Shielded Deposit        ');
   console.log('================================================================\n');
 
-  // 1. Initialize Shielded Pool Engine
-  const rpcUrl = process.env.SEPOLIA_RPC_URL || 'https://1rpc.io/sepolia';
-  console.log(`[1] Connecting to Sepolia via ${rpcUrl}...`);
+  const rpcUrl = process.env.SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com';
 
-  const pool = await ShieldedPool.create({
-    chainId: 11155111,
-    rpcUrl,
-    keyring: ShieldedKeyring.createRandom(),
-  });
-
-  const shieldedAddress = pool.getShieldedAddress();
-  console.log(`🔐 Leader Shielded Address (0zk): \x1b[32m${shieldedAddress}\x1b[0m\n`);
-
-  // 2. Set up Public Signer Wallet (Load or auto-generate persistent test wallet)
+  // 1. Set up Public Signer Wallet (Load or auto-generate persistent test wallet)
   let rawPk = process.env.SEPOLIA_PRIVATE_KEY as `0x${string}`;
   const envPath = path.resolve(__dirname, '../../../.env');
   const isValidPk = rawPk && /^0x[0-9a-fA-F]{64}$/.test(rawPk);
@@ -48,7 +37,19 @@ async function main() {
     transport: http(rpcUrl),
   });
 
-  console.log(`[2] Public Signer Address: \x1b[36m${account.address}\x1b[0m`);
+  console.log(`[1] Public Signer Address: \x1b[36m${account.address}\x1b[0m`);
+
+  // 2. Initialize Shielded Pool Engine with deterministic keyring derived from private key
+  console.log(`[2] Connecting to Sepolia via ${rpcUrl}...`);
+  const keyring = ShieldedKeyring.fromPrivateKey(rawPk);
+  const pool = await ShieldedPool.create({
+    chainId: 11155111,
+    rpcUrl,
+    keyring,
+  });
+
+  const shieldedAddress = pool.getShieldedAddress();
+  console.log(`🔐 Leader Shielded Address (0zk): \x1b[32m${shieldedAddress}\x1b[0m\n`);
 
   // 3. Check Signer Balance on Sepolia
   const balanceWei = await pool.client.publicClient.getBalance({ address: account.address });

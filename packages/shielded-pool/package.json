@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "ui": "tsx scripts/server.ts",
     "demo:deposit": "tsx scripts/demo-deposit.ts",
     "deposit:sepolia": "tsx scripts/execute-sepolia-deposit.ts",
     "unshield:sepolia": "tsx scripts/execute-sepolia-unshield.ts",

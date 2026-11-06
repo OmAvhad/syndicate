@@ -19,11 +19,15 @@ export class UnshieldService {
       throw new Error(`Unknown asset symbol: ${params.assetSymbol}`);
     }
 
-    let asset: { __type: 'erc20'; contract: `0x${string}` } | { __type: 'native' };
+    let asset: { __type: 'erc20'; contract: `0x${string}` };
 
-    if (params.assetSymbol === 'ETH') {
-      // Native ETH: SDK internally converts to WETH unshield + WETH.withdraw()
-      asset = { __type: 'native' };
+    if (params.assetSymbol === 'ETH' || params.assetSymbol === 'WETH') {
+      // Railgun holds ETH as WETH (0xfff9976782d46cc05630d1f6ebab18b2324d6b14).
+      // Unshielding directly as ERC20 sends the funds straight from the privacy pool to the destination address.
+      // (Using __type: 'native' would inject a WETH.withdraw() call onto the AA bundler sender, which reverts
+      // because destinationAddress receives the tokens, not the AA sender).
+      const wethAddress = SEPOLIA_TOKENS.WETH.address!;
+      asset = { __type: 'erc20', contract: wethAddress };
     } else {
       if (!tokenConfig.address) {
         throw new Error(`Token ${params.assetSymbol} has no contract address`);
@@ -59,7 +63,6 @@ export class UnshieldService {
     console.log('[UnshieldService] Broadcast confirmed ✅');
 
     return {
-      // broadcast() doesn't return hash directly; we report what we know
       userOpHash: '0x' as `0x${string}`,
       destinationAddress: params.destinationAddress,
       amount: params.amount,

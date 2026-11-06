@@ -12,7 +12,8 @@ export class BalanceService {
 
     let assetFilter: any[] | undefined;
     if (tokenConfig && !tokenConfig.isNative && tokenConfig.address) {
-      assetFilter = [{ __type: 'erc20', contract: tokenConfig.address }];
+      // Pass lowercase contract address to match Rust WASM internals
+      assetFilter = [{ __type: 'erc20', contract: tokenConfig.address.toLowerCase() as `0x${string}` }];
     }
 
     // Query balance and notes from Kohaku Railgun Plugin
@@ -21,20 +22,29 @@ export class BalanceService {
 
     let totalAmount = 0n;
     if (balances && balances.length > 0) {
-      totalAmount = balances[0].amount;
+      if (tokenConfig?.address) {
+        const match = balances.find(
+          (b: any) => b.asset?.contract?.toLowerCase() === tokenConfig.address!.toLowerCase()
+        );
+        totalAmount = match ? match.amount : balances[0].amount;
+      } else {
+        totalAmount = balances[0].amount;
+      }
     }
 
     const decimals = tokenConfig?.decimals ?? 18;
     const formatted = formatUnits(totalAmount, decimals);
 
-    const notes: ShieldedNoteInfo[] = rawNotes.map((note) => ({
-      assetContract: note.asset.contract,
-      amount: note.amount,
-      treeNumber: note.treeNumber,
-      leafIndex: note.leafIndex,
-      blindedCommitment: note.blindedCommitment,
-      memo: note.memo,
-    }));
+    const notes: ShieldedNoteInfo[] = rawNotes
+      .filter((note: any) => !tokenConfig?.address || note.asset?.contract?.toLowerCase() === tokenConfig.address.toLowerCase())
+      .map((note: any) => ({
+        assetContract: note.asset.contract,
+        amount: note.amount,
+        treeNumber: note.treeNumber,
+        leafIndex: note.leafIndex,
+        blindedCommitment: note.blindedCommitment,
+        memo: note.memo,
+      }));
 
     return {
       assetContract: tokenConfig?.address || 'native',
