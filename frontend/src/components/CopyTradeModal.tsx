@@ -175,41 +175,46 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 <span className="mono tnum text-accent font-semibold">${signal.limit}</span>
               </div>
 
-              {/* Live Sepolia Proofs for Judges */}
+              {/* Live Sepolia Proofs for Judges (Ultra High Contrast Dark Text) */}
               {onchainReceipt && (
-                <div className="pt-2 border-t border-border space-y-1.5">
-                  <div className="text-[10px] font-bold text-accent uppercase tracking-wider flex items-center gap-1">
-                    <Zap className="w-3 h-3" />
-                    <span>Follower Sepolia Receipts</span>
+                <div className="p-3 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 space-y-2 text-zinc-950 dark:text-zinc-100 shadow-sm">
+                  <div className="text-[11px] font-black text-zinc-950 dark:text-white uppercase tracking-wider flex items-center justify-between pb-1 border-b border-zinc-300 dark:border-zinc-800">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-accent fill-emerald-500/20" />
+                      <span className="font-extrabold text-zinc-950 dark:text-white">Follower Sepolia Receipts</span>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                      CONFIRMED
+                    </span>
                   </div>
 
-                  <div className="flex justify-between items-center text-[11px]">
-                    <span className="text-text-muted">Leg 1: USDC Swap Tx</span>
+                  <div className="flex justify-between items-center text-[12px]">
+                    <span className="text-zinc-900 dark:text-zinc-200 font-bold">Leg 1: USDC Swap Tx</span>
                     <a
                       href={onchainReceipt.leg1ExplorerUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="mono text-accent hover:underline flex items-center gap-1 font-semibold"
+                      className="mono text-blue-700 hover:text-blue-900 dark:text-accent dark:hover:underline flex items-center gap-1 font-bold underline underline-offset-2"
                     >
                       <span>{truncateHash(onchainReceipt.leg1TxHash, 6)}</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
 
-                  <div className="flex justify-between items-center text-[11px]">
-                    <span className="text-text-muted">Leg 2: WETH Position Tx</span>
+                  <div className="flex justify-between items-center text-[12px]">
+                    <span className="text-zinc-900 dark:text-zinc-200 font-bold">Leg 2: WETH Position Tx</span>
                     <a
                       href={onchainReceipt.leg2ExplorerUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="mono text-accent hover:underline flex items-center gap-1 font-semibold"
+                      className="mono text-blue-700 hover:text-blue-900 dark:text-accent dark:hover:underline flex items-center gap-1 font-bold underline underline-offset-2"
                     >
                       <span>{truncateHash(onchainReceipt.leg2TxHash, 6)}</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
 
-                  <div className="flex justify-between items-center text-[10px] text-text-muted pt-0.5">
+                  <div className="flex justify-between items-center text-[11px] text-zinc-900 dark:text-zinc-300 font-semibold pt-1 border-t border-zinc-300 dark:border-zinc-800">
                     <span>Block #{onchainReceipt.blockNumber}</span>
                     <span>Gas: {onchainReceipt.gasUsed}</span>
                   </div>

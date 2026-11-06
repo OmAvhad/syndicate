@@ -281,12 +281,12 @@ export async function storeTradePromiseInArkiv({
     : '0x0000000000000000000000000000000000000000';
 
   const payload = {
-    promiseId: String(promiseId),
-    leaderPublicKey: normLeaderKey,
-    leaderNullifier: String(leaderNullifier || ''),
-    tradeIndex: BigInt(tradeIndex || 1),
-    payloadHash: String(payloadHash || ''),
-    timestamp: String(timestamp || new Date().toISOString()),
+    promiseId: str(promiseId),
+    leaderPublicKey: addr(normLeaderKey),
+    leaderNullifier: str(leaderNullifier || ''),
+    tradeIndex: u64(BigInt(tradeIndex || 1)),
+    payloadHash: str(payloadHash || ''),
+    timestamp: str(timestamp || new Date().toISOString()),
   };
 
   try {

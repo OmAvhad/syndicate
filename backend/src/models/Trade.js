@@ -39,7 +39,7 @@ const tradeSchema = new mongoose.Schema(
     },
     orderType: {
       type: String,
-      enum: ['LIMIT', 'MARKET'],
+      enum: ['LIMIT', 'MARKET', 'BRACKET', 'TWAP'],
       default: 'LIMIT',
     },
     limit: {
