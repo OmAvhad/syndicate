@@ -1,5 +1,6 @@
 import { useAuth } from '@/context/AuthContext'
 import WorldIDButton from '@/components/WorldIDButton'
+import ThemeToggle from '@/components/ThemeToggle'
 import { ShieldCheck, Fingerprint, Lock, Cpu, EyeOff, KeyRound, Check } from 'lucide-react'
 
 export default function LandingPage() {
@@ -78,10 +79,11 @@ export default function LandingPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1 rounded-pill bg-surface border border-border text-xs text-text-secondary">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-pill bg-surface border border-border text-xs text-text-secondary">
               <span className="w-1.5 h-1.5 rounded-full bg-semantic-success shadow-[0_0_8px_rgba(121,217,154,0.6)]" />
               <span>World ID 4.0 Active</span>
             </div>
+            <ThemeToggle variant="compact" />
           </div>
         </div>
       </header>
