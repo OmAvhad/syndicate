@@ -4,6 +4,7 @@ import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
 import {
   executeTwoLegEntrySwap,
+  executeTwoLegExitSwap,
   type OnchainExecutionResult,
   fetchSepoliaBalances,
   FOLLOWER_BURNER_KEY,
@@ -55,6 +56,11 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
   const [copyLogs, setCopyLogs] = useState<FollowerLogItem[]>([])
   const [followerBalances, setFollowerBalances] = useState<{ usdc: string; weth: string; eth: string } | null>(null)
   const [isLoadingBalance, setIsLoadingBalance] = useState(false)
+
+  // Follower Exit Settlements (Bull TP / Bear SL)
+  const [isExiting, setIsExiting] = useState(false)
+  const [exitResult, setExitResult] = useState<OnchainExecutionResult | null>(null)
+  const [exitType, setExitType] = useState<'tp' | 'sl' | null>(null)
 
   const loadFollowerBalance = useCallback(async () => {
     try {
@@ -191,6 +197,148 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
       addCopyLog('warn', `Execution error: ${e.message || 'Onchain swap failed'}`)
     } finally {
       setIsExecuting(false)
+    }
+  }
+
+  // Trigger Onchain Take-Profit Exit ($3,350 Target - Bull Move)
+  const handleTriggerTakeProfitExit = async () => {
+    try {
+      setIsExiting(true)
+      setExitType('tp')
+      setErrorMessage(null)
+
+      const usdcCapital = numAmount > 0 ? numAmount : 2.00
+      const targetPrice = Number(signal.target || 3350)
+      const grossUsdc = Number((usdcCapital * (targetPrice / entryPrice)).toFixed(2))
+      const feeUsdc = Number((usdcCapital * 0.003).toFixed(2)) // 30 bps
+      const profitUsdc = Number((grossUsdc - feeUsdc).toFixed(2))
+      const netProfitAmount = Number((profitUsdc - usdcCapital).toFixed(2))
+
+      addCopyLog('info', `Take-Profit Trigger Hit ($${targetPrice.toLocaleString()}): Initiating onchain exit settlement...`)
+      addCopyLog('onchain', `Returning ${calculatedWeth} WETH position to FlashTradePool Vault...`)
+
+      const exitReceipt = await executeTwoLegExitSwap({
+        traderKey: FOLLOWER_BURNER_KEY,
+        wethAmountNumber: calculatedWeth,
+        usdcReturnAmountNumber: profitUsdc,
+        onLog: (msg) => {
+          console.log(`[Follower Exit] ${msg}`)
+          if (msg.includes('Leg 1: Returned WETH position to Vault')) {
+            addCopyLog('onchain', `Leg 1: WETH returned to Vault (Tx mined on Sepolia)`)
+          } else if (msg.includes('Leg 2: Vault released USDC with profit')) {
+            addCopyLog('onchain', `Leg 2: Vault released $${profitUsdc.toFixed(2)} USDC to Follower Burner`)
+          }
+        },
+      })
+
+      setExitResult(exitReceipt)
+      await loadFollowerBalance()
+      setTimeout(() => { loadFollowerBalance() }, 2500)
+
+      addCopyLog(
+        'success',
+        `Exit Settled Onchain! Realized Net Profit: +$${netProfitAmount.toFixed(2)} USDC (+${targetGainPct}%)`,
+        { label: 'Etherscan USDC Release', url: exitReceipt.leg2ExplorerUrl }
+      )
+
+      // Log Follower Exit Event for Judges
+      logJudgeEvent({
+        category: 'EXIT_SETTLEMENT',
+        title: `Follower Bull Exit (Take-Profit @ $${targetPrice}) Onchain Settlement`,
+        details: {
+          tradeId: executionReceipt?.tradeId || 'N/A',
+          followerWallet: FOLLOWER_BURNER_ADDRESS,
+          wethPositionClosed: `${calculatedWeth} WETH`,
+          initialCapital: `$${usdcCapital.toFixed(2)} USDC`,
+          grossPayout: `$${grossUsdc.toFixed(2)} USDC (+${targetGainPct}%)`,
+          protocolFee: `-$${feeUsdc.toFixed(2)} USDC (30 bps)`,
+          netUsdcReleased: `$${profitUsdc.toFixed(2)} USDC`,
+          realizedNetProfit: `+$${netProfitAmount.toFixed(2)} USDC (+${targetGainPct}% Net)`,
+          blockNumber: exitReceipt.blockNumber,
+          gasUsed: exitReceipt.gasUsed,
+          txHash: exitReceipt.leg2TxHash,
+        },
+        links: [
+          { label: `Follower Return WETH Tx (${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
+          { label: `Follower USDC Payout Tx (${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
+        ],
+      })
+    } catch (err: unknown) {
+      const e = err as Error
+      console.error('[Follower Exit Error]', e)
+      addCopyLog('warn', `Exit settlement error: ${e.message}`)
+    } finally {
+      setIsExiting(false)
+    }
+  }
+
+  // Trigger Onchain Stop-Loss Exit ($2,800 Target - Bear Move)
+  const handleTriggerStopLossExit = async () => {
+    try {
+      setIsExiting(true)
+      setExitType('sl')
+      setErrorMessage(null)
+
+      const usdcCapital = numAmount > 0 ? numAmount : 2.00
+      const stopPrice = Number(signal.stopLoss || 2800)
+      const grossUsdc = Number((usdcCapital * (stopPrice / entryPrice)).toFixed(2))
+      const feeUsdc = Number((usdcCapital * 0.003).toFixed(2))
+      const returnUsdc = Number((grossUsdc - feeUsdc).toFixed(2))
+      const netLossAmount = Number((returnUsdc - usdcCapital).toFixed(2))
+
+      addCopyLog('info', `Stop-Loss Trigger Hit ($${stopPrice.toLocaleString()}): Initiating onchain exit settlement...`)
+      addCopyLog('onchain', `Returning ${calculatedWeth} WETH position to FlashTradePool Vault...`)
+
+      const exitReceipt = await executeTwoLegExitSwap({
+        traderKey: FOLLOWER_BURNER_KEY,
+        wethAmountNumber: calculatedWeth,
+        usdcReturnAmountNumber: returnUsdc,
+        onLog: (msg) => {
+          console.log(`[Follower Exit] ${msg}`)
+          if (msg.includes('Leg 1: Returned WETH position to Vault')) {
+            addCopyLog('onchain', `Leg 1: WETH returned to Vault (Tx mined on Sepolia)`)
+          } else if (msg.includes('Leg 2: Vault released USDC with profit')) {
+            addCopyLog('onchain', `Leg 2: Vault released $${returnUsdc.toFixed(2)} USDC to Follower Burner`)
+          }
+        },
+      })
+
+      setExitResult(exitReceipt)
+      await loadFollowerBalance()
+      setTimeout(() => { loadFollowerBalance() }, 2500)
+
+      addCopyLog(
+        'warn',
+        `Stop-Loss Settled Onchain! Capital Preserved: $${returnUsdc.toFixed(2)} USDC (${netLossAmount.toFixed(2)})`,
+        { label: 'Etherscan USDC Release', url: exitReceipt.leg2ExplorerUrl }
+      )
+
+      // Log Follower Exit Event for Judges
+      logJudgeEvent({
+        category: 'EXIT_SETTLEMENT',
+        title: `Follower Bear Exit (Stop-Loss @ $${stopPrice}) Onchain Settlement`,
+        details: {
+          tradeId: executionReceipt?.tradeId || 'N/A',
+          followerWallet: FOLLOWER_BURNER_ADDRESS,
+          wethPositionClosed: `${calculatedWeth} WETH`,
+          initialCapital: `$${usdcCapital.toFixed(2)} USDC`,
+          netUsdcPreserved: `$${returnUsdc.toFixed(2)} USDC`,
+          realizedLoss: `${netLossAmount.toFixed(2)} USDC`,
+          blockNumber: exitReceipt.blockNumber,
+          gasUsed: exitReceipt.gasUsed,
+          txHash: exitReceipt.leg2TxHash,
+        },
+        links: [
+          { label: `Follower Return WETH Tx (${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
+          { label: `Follower USDC Preservation Tx (${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
+        ],
+      })
+    } catch (err: unknown) {
+      const e = err as Error
+      console.error('[Follower Exit Error]', e)
+      addCopyLog('warn', `Exit settlement error: ${e.message}`)
+    } finally {
+      setIsExiting(false)
     }
   }
 
@@ -342,6 +490,90 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     -${stopLossRiskUsdc.toFixed(2)} USDC (-{stopLossRiskPct}%)
                   </span>
                 </div>
+              </div>
+
+              {/* Bull / Bear Move Exit Settlement Triggers for Follower */}
+              <div className="p-3.5 rounded-lg bg-surface-raised border border-border space-y-2.5 text-left">
+                <div className="flex items-center justify-between text-[11px] font-black uppercase text-text-primary">
+                  <span className="flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-accent" />
+                    <span>Onchain Exit Settlements</span>
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-accent-soft text-accent">
+                    {exitResult ? 'POSITION CLOSED' : 'ORACLE TRIGGERS'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTriggerTakeProfitExit}
+                    disabled={isExiting || Boolean(exitResult)}
+                    className="py-2.5 px-2 rounded-md bg-semantic-success/20 hover:bg-semantic-success/30 border border-semantic-success/50 text-semantic-success font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                  >
+                    {isExiting && exitType === 'tp' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Closing...</span>
+                      </>
+                    ) : exitResult && exitType === 'tp' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Take-Profit Hit</span>
+                      </>
+                    ) : (
+                      <>
+                        <TrendingUp className="w-3.5 h-3.5" />
+                        <span>🚀 Bull Move ($3,350)</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTriggerStopLossExit}
+                    disabled={isExiting || Boolean(exitResult)}
+                    className="py-2.5 px-2 rounded-md bg-semantic-danger/15 hover:bg-semantic-danger/25 border border-semantic-danger/40 text-semantic-danger font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                  >
+                    {isExiting && exitType === 'sl' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Closing...</span>
+                      </>
+                    ) : exitResult && exitType === 'sl' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Stop-Loss Hit</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span>🛑 Bear Move ($2,800)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {exitResult && (
+                  <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-zinc-950 dark:text-zinc-100 space-y-1.5 shadow-sm animate-fadeIn">
+                    <div className="text-[11px] font-black text-emerald-900 dark:text-emerald-300 flex items-center justify-between">
+                      <span>✅ Follower Exit Settled Onchain!</span>
+                      <span className="mono tnum text-[10px] font-bold">Block #{exitResult.blockNumber}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[12px]">
+                      <span className="text-zinc-900 dark:text-zinc-200 font-bold">USDC Payout Tx:</span>
+                      <a
+                        href={exitResult.leg2ExplorerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mono text-blue-700 hover:text-blue-900 dark:text-accent font-bold underline underline-offset-2 flex items-center gap-1"
+                      >
+                        <span>{truncateHash(exitResult.leg2TxHash, 6)}</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Follower Execution Logs & Audit Trail */}
