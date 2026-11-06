@@ -1,0 +1,29 @@
+{
+  "name": "@syndicate/shielded-pool",
+  "version": "0.1.0",
+  "description": "Standalone Shielded Pool module for SyndicateCopy using the Kohaku SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "ui": "tsx scripts/server.ts",
+    "demo:deposit": "tsx scripts/demo-deposit.ts",
+    "deposit:sepolia": "tsx scripts/execute-sepolia-deposit.ts",
+    "unshield:sepolia": "tsx scripts/execute-sepolia-unshield.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@kohaku-eth/plugins": "0.0.1-alpha.14",
+    "@kohaku-eth/provider": "0.1.0-alpha.10",
+    "@kohaku-eth/railgun": "0.0.1-alpha.31",
+    "dotenv": "^16.4.7",
+    "viem": "^2.21.58"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
