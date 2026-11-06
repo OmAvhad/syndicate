@@ -632,16 +632,31 @@ export default function LeaderTerminalPage() {
                   )}
 
                   {promiseData?.arkivEntityKey && (
-                    <div className="flex justify-between items-center p-2 rounded bg-surface border border-border">
-                      <span className="text-text-muted">Arkiv Sealed Promise</span>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(promiseData.arkivEntityKey!, 'arkiv')}
-                        className="copy-chip text-[10px]"
-                      >
-                        <span className="mono tnum">{truncateHash(promiseData.arkivEntityKey, 6)}</span>
-                        {copiedKey === 'arkiv' ? <Check className="w-3 h-3 text-semantic-success" /> : <Copy className="w-3 h-3" />}
-                      </button>
+                    <div className="flex justify-between items-center p-2.5 rounded bg-surface border border-border">
+                      <div className="flex items-center gap-1.5">
+                        <Database className="w-3.5 h-3.5 text-accent" />
+                        <span className="text-text-muted">Arkiv Sealed Entity</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`https://testnet.explorer.arkiv.network/entity/${promiseData.arkivEntityKey}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mono text-accent hover:underline flex items-center gap-1 font-semibold text-[11px]"
+                          title="View entity on Arkiv Rabdi Testnet Explorer"
+                        >
+                          <span>{truncateHash(promiseData.arkivEntityKey, 6)}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(promiseData.arkivEntityKey!, 'arkiv')}
+                          className="copy-chip text-[10px]"
+                          title="Copy Arkiv Entity Key"
+                        >
+                          {copiedKey === 'arkiv' ? <Check className="w-3 h-3 text-semantic-success" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
                     </div>
                   )}
 

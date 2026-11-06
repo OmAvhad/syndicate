@@ -260,15 +260,26 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     <Database className="w-3 h-3 text-accent" />
                     ArkDB Key
                   </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyKey}
-                    className="copy-chip text-[10px]"
-                    title="Copy ArkDB Entity Key"
-                  >
-                    <span className="mono tnum">{truncateHash(signal.arkivEntityKey, 8)}</span>
-                    {copied ? <Check className="w-2.5 h-2.5 text-semantic-success" /> : <Copy className="w-2.5 h-2.5" />}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`https://testnet.explorer.arkiv.network/entity/${signal.arkivEntityKey}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mono text-accent hover:underline flex items-center gap-1 font-semibold text-[10px]"
+                      title="View entity on Arkiv Rabdi Explorer"
+                    >
+                      <span>{truncateHash(signal.arkivEntityKey, 8)}</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleCopyKey}
+                      className="copy-chip text-[10px]"
+                      title="Copy ArkDB Entity Key"
+                    >
+                      {copied ? <Check className="w-2.5 h-2.5 text-semantic-success" /> : <Copy className="w-2.5 h-2.5" />}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
