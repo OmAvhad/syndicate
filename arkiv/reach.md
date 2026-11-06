@@ -22,3 +22,4 @@
 
 3. **Verifiable Audit Records for All Trading Protocols:**
    * Any social trading platform, DAO treasury, or hedge fund can query Arkiv's `trade_promises` schema to audit any leader's historical performance with zero possibility of retroactive tampering.
+

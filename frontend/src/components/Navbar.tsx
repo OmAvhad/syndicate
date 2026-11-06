@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useSignals } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import ThemeToggle from '@/components/ThemeToggle'
-import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio, Zap } from 'lucide-react'
+import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio, Zap, Download } from 'lucide-react'
 
 export default function Navbar() {
   const { user, logout } = useAuth()
@@ -115,6 +115,17 @@ export default function Navbar() {
               <span>Link Wallet</span>
             </Link>
           )}
+
+          {/* Judge Log Export Button */}
+          <button
+            type="button"
+            onClick={() => window.downloadJudgeLogs && window.downloadJudgeLogs()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-accent-soft hover:bg-accent/20 border border-accent/40 text-xs font-semibold text-accent transition-colors cursor-pointer"
+            title="Download output.md for hackathon judges"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">output.md</span>
+          </button>
 
           {/* Theme Switcher Button */}
           <ThemeToggle variant="compact" />

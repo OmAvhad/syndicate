@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
+import { logJudgeEvent } from '@/lib/judgeLogger'
 import {
   executeTwoLegEntrySwap,
   executeTwoLegExitSwap,
@@ -29,6 +30,7 @@ import {
   Database,
   RefreshCw,
   Zap,
+  Download,
 } from 'lucide-react'
 
 const SYMBOLS = [
@@ -149,6 +151,29 @@ export default function LeaderTerminalPage() {
 
       console.log('[Terminal] Promise Committed with Sequential Index:', pData)
 
+      // Log Promise Event for Judges
+      logJudgeEvent({
+        category: 'PROMISE',
+        title: `Trade #${pData.tradeIndex} Sealed Promise Committed on Arkiv`,
+        details: {
+          tradeIndex: pData.tradeIndex,
+          promiseId: pData.promiseId,
+          symbol: tradePayload.symbol,
+          side: tradePayload.side,
+          limitPrice: `$${tradePayload.limit}`,
+          amountUSDC: `$${tradePayload.amount.toFixed(2)}`,
+          stopLoss: `$${tradePayload.stopLoss}`,
+          takeProfit: `$${tradePayload.target}`,
+          burnerWallet: tradePayload.burnerAccountAddress,
+          payloadHash: pData.payloadHash,
+          arkivEntityKey: pData.arkivEntityKey || 'Pending',
+          retention: '30 Days (Audit Epoch)',
+        },
+        links: pData.arkivEntityKey ? [
+          { label: `Arkiv Rabdi Explorer (Entity: ${pData.arkivEntityKey})`, url: `https://testnet.explorer.arkiv.network/entity/${pData.arkivEntityKey}` },
+        ] : [],
+      })
+
       // Step 2: Real Onchain Execution on Ethereum Sepolia
       setStep('executing_onchain')
       setStepMessage('Executing real onchain two-leg swap (USDC ↔ WETH) on Ethereum Sepolia...')
@@ -160,6 +185,25 @@ export default function LeaderTerminalPage() {
         onLog: (msg) => console.log(`[Flash Engine] ${msg}`),
       })
       setOnchainResult(onchainRes)
+
+      // Log Onchain Trade for Judges
+      logJudgeEvent({
+        category: 'ONCHAIN_TRADE',
+        title: `Trade #${pData.tradeIndex} Atomic Flash Swap Mined on Ethereum Sepolia`,
+        details: {
+          tradeIndex: pData.tradeIndex,
+          burnerAddress: onchainRes.traderAddress,
+          usdcSpent: `$${onchainRes.usdcAmount} USDC`,
+          wethPositionDelivered: `${onchainRes.wethAmount} WETH`,
+          blockNumber: onchainRes.blockNumber,
+          gasUsed: onchainRes.gasUsed,
+          settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
+        },
+        links: [
+          { label: `Etherscan Leg 1 (USDC Transfer: ${truncateHash(onchainRes.leg1TxHash, 6)})`, url: onchainRes.leg1ExplorerUrl },
+          { label: `Etherscan Leg 2 (WETH Delivery: ${truncateHash(onchainRes.leg2TxHash, 6)})`, url: onchainRes.leg2ExplorerUrl },
+        ],
+      })
 
       // Step 3: Trigger simultaneous Execution record & Follower Signals
       setStep('signaling')
@@ -195,6 +239,19 @@ export default function LeaderTerminalPage() {
           followersNotified: signalRes.data.followersNotified || 0,
           signals: signalRes.data.signals || [],
         })
+
+        // Log Signal Dispatch for Judges
+        logJudgeEvent({
+          category: 'ARKIV_SIGNAL',
+          title: `Trade #${pData.tradeIndex} Encrypted Signals Dispatched via WebSockets & ArkDB`,
+          details: {
+            tradeIndex: pData.tradeIndex,
+            followersNotified: signalRes.data.followersNotified || 0,
+            ttl: '600 Seconds (10 Minutes)',
+            expiresAt: signalRes.data.expiresAt,
+            channel: 'WebSockets (/ws) + Arkiv Rabdi Entity',
+          },
+        })
       }
 
       console.log('[Terminal] Real onchain trade & signal completed successfully!')
@@ -225,6 +282,24 @@ export default function LeaderTerminalPage() {
       })
 
       setExitResult(exitReceipt)
+
+      // Log Exit Settlement Event for Judges
+      logJudgeEvent({
+        category: 'EXIT_SETTLEMENT',
+        title: `Take-Profit Target Hit ($3,350) & Onchain Exit Settlement`,
+        details: {
+          wethPositionClosed: '0.001 WETH',
+          usdcReleasedWithProfit: `$${profitUsdc.toFixed(2)} USDC`,
+          protocolFee: '30 bps recorded',
+          blockNumber: exitReceipt.blockNumber,
+          gasUsed: exitReceipt.gasUsed,
+          settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
+        },
+        links: [
+          { label: `Etherscan Exit Leg 1 (WETH Return: ${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
+          { label: `Etherscan Exit Leg 2 (USDC Profit Release: ${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
+        ],
+      })
     } catch (err: unknown) {
       const e = err as Error
       console.error('[Exit Settlement] Error:', e)
@@ -717,10 +792,21 @@ export default function LeaderTerminalPage() {
                     )}
                   </div>
 
+                  {/* Judge Report Export Button */}
+                  <button
+                    type="button"
+                    onClick={() => window.downloadJudgeLogs && window.downloadJudgeLogs()}
+                    className="w-full py-2.5 px-3 rounded-md bg-accent-soft hover:bg-accent/20 border border-accent/40 text-accent font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors mt-2"
+                    title="Downloads output.md containing all onchain transactions, blocks, and Arkiv keys"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download output.md (Judge Proofs)</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={handleReset}
-                    className="w-full py-2 rounded-md bg-surface hover:bg-surface-hover border border-border text-xs font-semibold text-text-primary transition-colors mt-2"
+                    className="w-full py-2 rounded-md bg-surface hover:bg-surface-hover border border-border text-xs font-semibold text-text-primary transition-colors mt-1"
                   >
                     Place Another Order
                   </button>

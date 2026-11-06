@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSignals, TradeSignalItem } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
+import { logJudgeEvent } from '@/lib/judgeLogger'
 import {
   executeTwoLegEntrySwap,
   type OnchainExecutionResult,
@@ -74,6 +75,27 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
         onLog: (msg) => console.log(`[Follower Flash] ${msg}`),
       })
       setOnchainReceipt(onchainRes)
+
+      // Log Follower Copy Event for Judges
+      logJudgeEvent({
+        category: 'FOLLOWER_COPY',
+        title: `Follower Copied Trade #${signal.tradeIndex || 1} onchain on Ethereum Sepolia`,
+        details: {
+          signalId: signal.signalId,
+          leaderUsername: signal.leaderUsername,
+          symbol: signal.symbol,
+          side: signal.side,
+          copyCapitalUSDC: `$${numAmount.toFixed(2)} USDC`,
+          wethPositionReceived: `${onchainRes.wethAmount} WETH`,
+          blockNumber: onchainRes.blockNumber,
+          gasUsed: onchainRes.gasUsed,
+          settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
+        },
+        links: [
+          { label: `Follower USDC Transfer (${truncateHash(onchainRes.leg1TxHash, 6)})`, url: onchainRes.leg1ExplorerUrl },
+          { label: `Follower WETH Position (${truncateHash(onchainRes.leg2TxHash, 6)})`, url: onchainRes.leg2ExplorerUrl },
+        ],
+      })
 
       // 2. Record Copy Execution in Database
       const res = await executeCopyTrade(signal.signalId, numAmount)

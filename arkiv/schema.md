@@ -60,3 +60,4 @@ export const TradePromiseSchema = defineSchema('trade_promises', {
   timestamp:        str().indexed(),   // Commitment timestamp
 });
 ```
+

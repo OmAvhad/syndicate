@@ -28,3 +28,4 @@ Copy trading today suffers from three fatal structural vulnerabilities:
 
 3. **Rotating Tag Privacy:**
    Signals are queried using rotating cryptographic tags derived from shared secret keys. Outsiders querying Arkiv cannot even correlate which signals belong to which leader.
+

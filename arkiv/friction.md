@@ -31,3 +31,4 @@
 
 ## 🏆 Verdict
 Arkiv solves an existential problem in Web3 data management: **not all data belongs on permanent L1 state.** For ephemeral coordination (signals, auctions, commitments), Arkiv is in a league of its own.
+
