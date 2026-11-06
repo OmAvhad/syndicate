@@ -1,8 +1,13 @@
 {
-  "name": "world-id-auth",
+  "name": "syndicate",
+  "version": "1.0.0",
   "scripts": {
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
-    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+    "demo:shielded-pool": "cd packages/shielded-pool && npm run demo:deposit",
+    "deposit:sepolia": "cd packages/shielded-pool && npm run deposit:sepolia",
+    "unshield:sepolia": "cd packages/shielded-pool && npm run unshield:sepolia",
+    "test:shielded-pool": "cd packages/shielded-pool && npm test",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install && cd ../packages/shielded-pool && npm install"
   }
 }
