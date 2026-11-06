@@ -160,8 +160,8 @@ npx expo start # Scan QR code with Expo Go or press 'w' for web view
 ## 📦 Arkiv Protocol Integration (Judges Evaluation)
 
 * **Network:** Arkiv Rabdi Testnet
-* **Writing Relayer Address:** [`0x0962cC66c69426C32574447cF50fe9664fE94451`](https://testnet.explorer.arkiv.network)
-* **Arkiv Explorer:** [`https://testnet.explorer.arkiv.network`](https://testnet.explorer.arkiv.network)
+* **Writing Relayer Address:** [`0x0962cC66c69426C32574447cF50fe9664fE94451`](https://rabdi.explorer.arkiv.network/address/0x0962cC66c69426C32574447cF50fe9664fE94451)
+* **Arkiv Rabdi Explorer:** [`https://rabdi.explorer.arkiv.network/entity-explorer`](https://rabdi.explorer.arkiv.network/entity-explorer)
 
 ### 📑 Arkiv Track Documentation (25% Scoring Breakdown):
 1. [Schema Definitions (`arkiv/schema.md`)](./arkiv/schema.md) — `follower_relationships` (30d TTL), `trade_signals` (10m TTL), `trade_promises` (30d retention).

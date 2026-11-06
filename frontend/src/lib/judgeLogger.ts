@@ -120,7 +120,8 @@ SyndicateCopy eliminates public wallet tracking and sandwich bot front-running b
   md += `## 📑 How Judges Can Verify This Output
 
 1. **Arkiv Sealed Promises:**
-   * Query the \`trade_promises\` schema using the entity keys listed above at \`https://testnet.explorer.arkiv.network\`.
+   * Query the \`trade_promises\` schema using the entity keys listed above at \`https://rabdi.explorer.arkiv.network/entity-explorer\`.
+   * Direct entity URL: \`https://rabdi.explorer.arkiv.network/entity/:entityKey\`.
    * Verify that the sequential index (\`Trade #N\`) is unbroken and the HMAC payload hash matches the trade parameters.
 2. **Onchain Sepolia Transactions:**
    * Click any of the Sepolia Etherscan links above to verify that the atomic two-leg swap (USDC transfer $\\leftrightarrow$ WETH position delivery) took place with real gas and block confirmations.

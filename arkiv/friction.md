@@ -22,7 +22,7 @@
 * **Suggestion:** Provide a built-in `createMockClient()` or `@arkiv-network/emulator` package that supports schema validation, in-memory indexing, and simulated TTLs for local testing.
 
 ### 2. Explorer Deep-Linking & Entity Inspection
-* **Friction:** While the SDK returns `entityKey` and `txHash`, finding direct URL formats to link judges to single entities on the Rabdi explorer (`https://testnet.explorer.arkiv.network/entity/:key`) could be standardized with helper functions in the SDK (e.g. `client.getExplorerUrl(entityKey)`).
+* **Friction:** While the SDK returns `entityKey` and `txHash`, finding direct URL formats to link judges to single entities on the Rabdi explorer (`https://rabdi.explorer.arkiv.network/entity/:key` vs `/entity-explorer`) could be standardized with helper functions in the SDK (e.g. `client.getExplorerUrl(entityKey)`).
 
 ### 3. TypeScript Query Filter Typings
 * **Friction:** In complex queries with indexed fields, the `where` clause could benefit from strictly typed autocomplete derived directly from the schema definition.

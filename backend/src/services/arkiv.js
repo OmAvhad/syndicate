@@ -156,14 +156,14 @@ export async function storeFollowerRelationshipInArkiv({
     .createHash('sha256')
     .update(`${leaderNullifier}:${followerNullifier}:${transactionId}:${transactionDate}`)
     .digest('hex');
-  const fallbackKey = `0xarkiv_${hash.slice(0, 32)}`;
+  const fallbackKey = `0x${hash}`;
   const backendAddress = getArkivWalletClient()?.account?.address || '0x1502B0a879C59Aa38bc704eA807f0Eaa22F42Dbf';
 
   return {
     success: true,
     onChain: false,
     entityKey: fallbackKey,
-    txHash: `0xtx_${hash.slice(32, 64)}`,
+    txHash: `0x${crypto.createHash('sha256').update(hash).digest('hex')}`,
     network: 'rabdi-testnet (pending gas)',
     ttlDays: 30,
     backendAddress,
@@ -258,8 +258,8 @@ export async function storeTradeSignalInArkiv({
   return {
     success: true,
     onChain: false,
-    entityKey: `0xsignal_${hash.slice(0, 32)}`,
-    txHash: `0xtx_${hash.slice(32, 64)}`,
+    entityKey: `0x${hash}`,
+    txHash: `0x${crypto.createHash('sha256').update(hash).digest('hex')}`,
     ttlMinutes: 10,
   };
 }
@@ -320,8 +320,8 @@ export async function storeTradePromiseInArkiv({
   return {
     success: true,
     onChain: false,
-    entityKey: `0xprm_${fallbackHash.slice(0, 32)}`,
-    txHash: `0xtx_prm_${fallbackHash.slice(32, 64)}`,
+    entityKey: `0x${fallbackHash}`,
+    txHash: `0x${crypto.createHash('sha256').update(fallbackHash).digest('hex')}`,
     tradeIndex: Number(tradeIndex),
   };
 }

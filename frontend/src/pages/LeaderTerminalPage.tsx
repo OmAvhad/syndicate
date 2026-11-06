@@ -204,7 +204,7 @@ export default function LeaderTerminalPage() {
         addTradeLog(
           'success',
           `Trade #${pData.tradeIndex} Promise sealed on Arkiv (Key: ${truncateHash(pData.arkivEntityKey, 6)})`,
-          { label: 'Arkiv Explorer', url: `https://testnet.explorer.arkiv.network/entity/${pData.arkivEntityKey}` }
+          { label: 'Rabdi Explorer', url: `https://rabdi.explorer.arkiv.network/entity/${pData.arkivEntityKey}` }
         )
       } else {
         addTradeLog('success', `Trade #${pData.tradeIndex} Promise sealed in ArkDB (30-day epoch)`)
@@ -229,7 +229,8 @@ export default function LeaderTerminalPage() {
           retention: '30 Days (Audit Epoch)',
         },
         links: pData.arkivEntityKey ? [
-          { label: `Arkiv Rabdi Explorer (Entity: ${pData.arkivEntityKey})`, url: `https://testnet.explorer.arkiv.network/entity/${pData.arkivEntityKey}` },
+          { label: `Arkiv Rabdi Explorer (Entity: ${pData.arkivEntityKey})`, url: `https://rabdi.explorer.arkiv.network/entity/${pData.arkivEntityKey}` },
+          { label: `Rabdi Entity Explorer Table`, url: `https://rabdi.explorer.arkiv.network/entity-explorer` },
         ] : [],
       })
 
@@ -1046,14 +1047,23 @@ export default function LeaderTerminalPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <a
-                          href={`https://testnet.explorer.arkiv.network/entity/${promiseData.arkivEntityKey}`}
+                          href={`https://rabdi.explorer.arkiv.network/entity/${promiseData.arkivEntityKey}`}
                           target="_blank"
                           rel="noreferrer"
                           className="mono text-blue-700 hover:text-blue-900 dark:text-accent dark:hover:underline flex items-center gap-1 font-bold text-[11px] underline underline-offset-2"
-                          title="View entity on Arkiv Rabdi Testnet Explorer"
+                          title="View entity on Arkiv Rabdi Explorer"
                         >
                           <span>{truncateHash(promiseData.arkivEntityKey, 6)}</span>
                           <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <a
+                          href="https://rabdi.explorer.arkiv.network/entity-explorer"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary"
+                          title="Browse all entities on Rabdi Entity Explorer"
+                        >
+                          Explorer
                         </a>
                         <button
                           type="button"

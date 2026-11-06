@@ -154,7 +154,8 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
         links: [
           { label: `Follower Leg 1 USDC Transfer (${truncateHash(onchainRes.leg1TxHash, 6)})`, url: onchainRes.leg1ExplorerUrl },
           { label: `Follower Leg 2 WETH Position (${truncateHash(onchainRes.leg2TxHash, 6)})`, url: onchainRes.leg2ExplorerUrl },
-          ...(signal.arkivEntityKey ? [{ label: `Arkiv Signal Entity (${truncateHash(signal.arkivEntityKey, 6)})`, url: `https://testnet.explorer.arkiv.network/entity/${signal.arkivEntityKey}` }] : []),
+          ...(signal.arkivEntityKey ? [{ label: `Arkiv Signal Entity (${truncateHash(signal.arkivEntityKey, 6)})`, url: `https://rabdi.explorer.arkiv.network/entity/${signal.arkivEntityKey}` }] : []),
+          { label: `Rabdi Entity Explorer Table`, url: `https://rabdi.explorer.arkiv.network/entity-explorer` },
         ],
       })
     } catch (err: unknown) {
@@ -449,7 +450,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   </span>
                   <div className="flex items-center gap-2">
                     <a
-                      href={`https://testnet.explorer.arkiv.network/entity/${signal.arkivEntityKey}`}
+                      href={`https://rabdi.explorer.arkiv.network/entity/${signal.arkivEntityKey}`}
                       target="_blank"
                       rel="noreferrer"
                       className="mono text-blue-700 hover:text-blue-900 dark:text-accent dark:hover:underline flex items-center gap-1 font-bold text-[10px] underline underline-offset-2"
@@ -457,6 +458,15 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     >
                       <span>{truncateHash(signal.arkivEntityKey, 8)}</span>
                       <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                    <a
+                      href="https://rabdi.explorer.arkiv.network/entity-explorer"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[9px] px-1.5 py-0.5 rounded font-bold bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary"
+                      title="Browse on Rabdi Entity Explorer"
+                    >
+                      Explorer
                     </a>
                     <button
                       type="button"

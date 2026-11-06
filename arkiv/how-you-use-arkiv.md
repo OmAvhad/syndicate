@@ -8,7 +8,7 @@ SyndicateCopy uses **Arkiv** as its verifiable decentralized data anchoring and 
 
 * **Target Network:** Arkiv Rabdi Testnet
 * **Writing Relayer Address:** `0x0962cC66c69426C32574447cF50fe9664fE94451`
-* **Explorer URL:** `https://testnet.explorer.arkiv.network`
+* **Explorer URL:** `https://rabdi.explorer.arkiv.network/entity-explorer`
 
 ---
 
