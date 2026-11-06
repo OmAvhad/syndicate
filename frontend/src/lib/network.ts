@@ -114,5 +114,3 @@ export async function decryptWithMetaMask<T = unknown>(encryptedHex: string, add
     return decryptedUtf8 as unknown as T
   }
 }
-
-

@@ -241,5 +241,26 @@ router.get('/following', async (req, res) => {
   }
 });
 
+// GET /api/followers - Get followers currently following authenticated user (leader)
+router.get('/followers', async (req, res) => {
+  try {
+    const followers = await Follow.find({
+      leaderId: req.user.userId,
+      status: 'active',
+    })
+      .populate('followerId', 'username nullifierHash walletAddress subscriptionFee followersCount followingCount bio')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      followers,
+    });
+  } catch (error) {
+    console.error('Get followers error:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch followers' });
+  }
+});
+
 export default router;
 

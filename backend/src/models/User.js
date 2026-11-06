@@ -37,6 +37,10 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  tradeCount: {
+    type: Number,
+    default: 0,
+  },
   bio: {
     type: String,
     default: null,

@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import WalletConnectButton from '@/components/WalletConnectButton'
 import { parseEther, toHex } from 'viem'
-import { ensureBaseSepoliaNetwork, getBaseScanTxUrl, getArkivExplorerUrl, getArkivDataExplorerUrl } from '@/lib/network'
+import { ensureBaseSepoliaNetwork, getBaseScanTxUrl, getBaseScanAddressUrl, getArkivExplorerUrl, getArkivDataExplorerUrl } from '@/lib/network'
 import {
   Compass,
   Users,
@@ -40,6 +40,37 @@ interface ExploreUser {
   arkivEntityKey: string | null
 }
 
+export interface FollowRelationshipItem {
+  _id: string
+  leaderId?: {
+    _id: string
+    username?: string
+    nullifierHash: string
+    walletAddress?: string
+    subscriptionFee?: number
+    followersCount?: number
+    bio?: string
+  }
+  followerId?: {
+    _id: string
+    username?: string
+    nullifierHash: string
+    walletAddress?: string
+    subscriptionFee?: number
+    followersCount?: number
+    followingCount?: number
+    bio?: string
+  }
+  leaderPublicKey?: string
+  followerPublicKey?: string
+  leaderNullifier?: string
+  followerNullifier?: string
+  transactionId?: string
+  arkivEntityKey?: string
+  expiresAt?: string
+  createdAt?: string
+}
+
 export default function ExplorePage() {
   const { user, refreshUser } = useAuth()
   const [users, setUsers] = useState<ExploreUser[]>([])
@@ -48,6 +79,12 @@ export default function ExplorePage() {
   const [selectedLeader, setSelectedLeader] = useState<ExploreUser | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
+  // Navigation Filter Tabs: 'all' | 'following' | 'followers'
+  const [activeTab, setActiveTab] = useState<'all' | 'following' | 'followers'>('all')
+  const [followingList, setFollowingList] = useState<FollowRelationshipItem[]>([])
+  const [followersList, setFollowersList] = useState<FollowRelationshipItem[]>([])
+  const [loadingSocial, setLoadingSocial] = useState(false)
+
   // Follow & Payment Transaction Lifecycle
   const [txStep, setTxStep] = useState<'review' | 'wallet_request' | 'anchoring_arkiv' | 'success' | 'error'>('review')
   const [txHash, setTxHash] = useState<string | null>(null)
@@ -55,6 +92,26 @@ export default function ExplorePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [unfollowingId, setUnfollowingId] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  const fetchSocialLists = useCallback(async () => {
+    try {
+      setLoadingSocial(true)
+      const [followingRes, followersRes] = await Promise.all([
+        api.get('/api/following').catch(() => ({ data: { following: [] } })),
+        api.get('/api/followers').catch(() => ({ data: { followers: [] } })),
+      ])
+      if (followingRes.data?.success) {
+        setFollowingList(followingRes.data.following || [])
+      }
+      if (followersRes.data?.success) {
+        setFollowersList(followersRes.data.followers || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch social lists:', err)
+    } finally {
+      setLoadingSocial(false)
+    }
+  }, [])
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -72,7 +129,8 @@ export default function ExplorePage() {
 
   useEffect(() => {
     fetchUsers()
-  }, [fetchUsers])
+    fetchSocialLists()
+  }, [fetchUsers, fetchSocialLists])
 
   const handleOpenFollowModal = (leader: ExploreUser) => {
     setSelectedLeader(leader)
@@ -152,6 +210,7 @@ export default function ExplorePage() {
         // Update local state and auth context
         await refreshUser()
         await fetchUsers()
+        await fetchSocialLists()
       } else {
         throw new Error(res.data?.error || 'Failed to register relationship in Arkiv')
       }
@@ -176,6 +235,7 @@ export default function ExplorePage() {
       if (res.data?.success) {
         await refreshUser()
         await fetchUsers()
+        await fetchSocialLists()
       }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string }
@@ -254,129 +314,480 @@ export default function ExplorePage() {
               Showing <strong>{filteredUsers.length}</strong> leaders
             </div>
           </div>
+
+          {/* Social Navigation Tabs (All Leaders / Following / Followers) */}
+          <div className="mt-6 pt-4 border-t border-border flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('all')}
+                className={`px-3.5 py-1.5 rounded-md text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 border ${
+                  activeTab === 'all'
+                    ? 'bg-accent text-text-inverse border-accent shadow-sm'
+                    : 'bg-surface-raised hover:bg-surface-hover text-text-secondary border-border'
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>All Leaders</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-extrabold ${activeTab === 'all' ? 'bg-black/20 text-text-inverse' : 'bg-surface text-text-muted'}`}>
+                  {users.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('following')}
+                className={`px-3.5 py-1.5 rounded-md text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 border ${
+                  activeTab === 'following'
+                    ? 'bg-accent text-text-inverse border-accent shadow-sm'
+                    : 'bg-surface-raised hover:bg-surface-hover text-text-secondary border-border'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Following</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-extrabold ${activeTab === 'following' ? 'bg-black/20 text-text-inverse' : 'bg-surface text-text-muted'}`}>
+                  {followingList.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('followers')}
+                className={`px-3.5 py-1.5 rounded-md text-xs font-bold transition-colors cursor-pointer flex items-center gap-2 border ${
+                  activeTab === 'followers'
+                    ? 'bg-accent text-text-inverse border-accent shadow-sm'
+                    : 'bg-surface-raised hover:bg-surface-hover text-text-secondary border-border'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Followers</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-extrabold ${activeTab === 'followers' ? 'bg-black/20 text-text-inverse' : 'bg-surface text-text-muted'}`}>
+                  {followersList.length}
+                </span>
+              </button>
+            </div>
+
+            <div className="text-xs text-text-muted tnum shrink-0">
+              {activeTab === 'all' && <>Showing <strong>{filteredUsers.length}</strong> leaders</>}
+              {activeTab === 'following' && <>You are following <strong>{followingList.length}</strong> leader(s)</>}
+              {activeTab === 'followers' && <><strong>{followersList.length}</strong> verified human(s) follow you</>}
+            </div>
+          </div>
         </div>
 
-        {/* Directory Grid */}
-        {loading ? (
-          <div className="py-20 flex flex-col items-center justify-center gap-3 text-text-muted">
-            <Loader2 className="w-8 h-8 animate-spin text-accent" />
-            <p className="text-xs uppercase tracking-widest font-semibold">Loading Verified Leaders...</p>
-          </div>
-        ) : filteredUsers.length === 0 ? (
-          <div className="surface p-12 text-center">
-            <Users className="w-10 h-10 text-text-muted mx-auto mb-3 stroke-[1.5]" />
-            <h3 className="text-base font-bold text-text-primary mb-1">No other users found</h3>
-            <p className="text-xs text-text-muted max-w-sm mx-auto">
-              {searchQuery
-                ? 'No leaders matched your search query. Try another term.'
-                : 'There are no other registered users yet. Test with another simulated identity!'}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredUsers.map((leader) => {
-              const leaderIdentifier = leader.username ? `@${leader.username}` : truncateHash(leader.nullifierHash, 8)
-              const avatarLetter = (leader.username || truncateHash(leader.nullifierHash))[0].toUpperCase()
+        {/* -----------------------------------------------------------------
+            VIEW 1: All Leaders Directory Grid
+            ----------------------------------------------------------------- */}
+        {activeTab === 'all' && (
+          <>
+            {loading ? (
+              <div className="py-20 flex flex-col items-center justify-center gap-3 text-text-muted">
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                <p className="text-xs uppercase tracking-widest font-semibold">Loading Verified Leaders...</p>
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="surface p-12 text-center">
+                <Users className="w-10 h-10 text-text-muted mx-auto mb-3 stroke-[1.5]" />
+                <h3 className="text-base font-bold text-text-primary mb-1">No other users found</h3>
+                <p className="text-xs text-text-muted max-w-sm mx-auto">
+                  {searchQuery
+                    ? 'No leaders matched your search query. Try another term.'
+                    : 'There are no other registered users yet. Test with another simulated identity!'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {filteredUsers.map((leader) => {
+                  const leaderIdentifier = leader.username ? `@${leader.username}` : truncateHash(leader.nullifierHash, 8)
+                  const avatarLetter = (leader.username || truncateHash(leader.nullifierHash))[0].toUpperCase()
 
-              return (
-                <Card key={leader.id} className="flex flex-col justify-between">
-                  <CardContent className="p-5 flex flex-col h-full justify-between gap-5">
-                    <div>
-                      {/* Top Row: Avatar & Badges */}
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-11 h-11 rounded-md bg-surface-raised border border-border flex items-center justify-center font-bold text-accent shrink-0 text-base">
-                            {avatarLetter}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-sm text-text-primary truncate">
-                              {leaderIdentifier}
+                  return (
+                    <Card key={leader.id} className="flex flex-col justify-between">
+                      <CardContent className="p-5 flex flex-col h-full justify-between gap-5">
+                        <div>
+                          {/* Top Row: Avatar & Badges */}
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-11 h-11 rounded-md bg-surface-raised border border-border flex items-center justify-center font-bold text-accent shrink-0 text-base">
+                                {avatarLetter}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-sm text-text-primary truncate">
+                                  {leaderIdentifier}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[11px] text-text-muted mt-0.5">
+                                  <ShieldCheck className="w-3 h-3 text-semantic-success stroke-[2.2]" />
+                                  <span>World ID Human</span>
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1.5 text-[11px] text-text-muted mt-0.5">
-                              <ShieldCheck className="w-3 h-3 text-semantic-success stroke-[2.2]" />
-                              <span>World ID Human</span>
+
+                            {leader.isFollowing ? (
+                              <Badge variant="success" className="shrink-0 text-[10px]">
+                                <UserCheck className="w-3 h-3" />
+                                Following
+                              </Badge>
+                            ) : (
+                              <Badge variant="accent" className="shrink-0 text-[10px]">
+                                {leader.subscriptionFee} ETH / 30d
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Bio */}
+                          <p className="text-xs text-text-secondary leading-relaxed mb-4 line-clamp-2">
+                            {leader.bio || 'Verified trader & strategist. Open for syndicate copy relationships.'}
+                          </p>
+
+                          {/* Public Key / Wallet Info */}
+                          <div className="p-2.5 rounded-sm bg-surface-raised border border-border text-xs mb-4 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-semibold text-text-muted">Public Address</span>
+                              {leader.walletAddress ? (
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(leader.walletAddress!, `addr-${leader.id}`)}
+                                  className="copy-chip text-[10px] py-0.5 px-1.5"
+                                >
+                                  <span className="mono tnum">{truncateHash(leader.walletAddress, 6)}</span>
+                                  {copiedKey === `addr-${leader.id}` ? (
+                                    <Check className="w-2.5 h-2.5 text-semantic-success" />
+                                  ) : (
+                                    <Copy className="w-2.5 h-2.5" />
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-semantic-warning">No wallet linked</span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-semibold text-text-muted">Followers</span>
+                              <span className="mono tnum text-xs font-bold text-text-primary">{leader.followersCount}</span>
                             </div>
                           </div>
                         </div>
 
-                        {leader.isFollowing ? (
-                          <Badge variant="success" className="shrink-0 text-[10px]">
-                            <UserCheck className="w-3 h-3" />
-                            Following
-                          </Badge>
-                        ) : (
-                          <Badge variant="accent" className="shrink-0 text-[10px]">
-                            {leader.subscriptionFee} ETH / 30d
-                          </Badge>
-                        )}
-                      </div>
-
-                      {/* Bio */}
-                      <p className="text-xs text-text-secondary leading-relaxed mb-4 line-clamp-2">
-                        {leader.bio || 'Verified trader & strategist. Open for syndicate copy relationships.'}
-                      </p>
-
-                      {/* Public Key / Wallet Info */}
-                      <div className="p-2.5 rounded-sm bg-surface-raised border border-border text-xs mb-4 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] uppercase font-semibold text-text-muted">Public Address</span>
-                          {leader.walletAddress ? (
+                        {/* Action Button */}
+                        <div className="pt-2 border-t border-border">
+                          {leader.isFollowing ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleUnfollow(leader.id)}
+                                disabled={unfollowingId === leader.id}
+                                className="flex-1 py-2 px-3 rounded-md bg-surface-raised hover:bg-semantic-danger/10 border border-border hover:border-semantic-danger/30 text-xs font-semibold text-semantic-danger transition-colors duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              >
+                                {unfollowingId === leader.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : null}
+                                <span>Unfollow</span>
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => copyToClipboard(leader.walletAddress!, `addr-${leader.id}`)}
-                              className="copy-chip text-[10px] py-0.5 px-1.5"
+                              onClick={() => handleOpenFollowModal(leader)}
+                              disabled={!leader.walletAddress}
+                              className="w-full py-2 px-3 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
                             >
-                              <span className="mono tnum">{truncateHash(leader.walletAddress, 6)}</span>
-                              {copiedKey === `addr-${leader.id}` ? (
-                                <Check className="w-2.5 h-2.5 text-semantic-success" />
-                              ) : (
-                                <Copy className="w-2.5 h-2.5" />
-                              )}
+                              <UserPlus className="w-3.5 h-3.5 stroke-[2.2]" />
+                              <span>Follow ({leader.subscriptionFee} ETH)</span>
                             </button>
-                          ) : (
-                            <span className="text-[10px] text-semantic-warning">No wallet linked</span>
                           )}
                         </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
 
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] uppercase font-semibold text-text-muted">Followers</span>
-                          <span className="mono tnum text-xs font-bold text-text-primary">{leader.followersCount}</span>
-                        </div>
-                      </div>
+        {/* -----------------------------------------------------------------
+            VIEW 2: Following Tab (< 3 Accounts Detailed Listing)
+            ----------------------------------------------------------------- */}
+        {activeTab === 'following' && (
+          <div className="space-y-4">
+            {loadingSocial ? (
+              <div className="py-20 flex flex-col items-center justify-center gap-3 text-text-muted">
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                <p className="text-xs uppercase tracking-widest font-semibold">Loading Following Relationships...</p>
+              </div>
+            ) : followingList.length === 0 ? (
+              <div className="surface p-12 text-center">
+                <UserCheck className="w-10 h-10 text-text-muted mx-auto mb-3 stroke-[1.5]" />
+                <h3 className="text-base font-bold text-text-primary mb-1">Not Following Any Leaders Yet</h3>
+                <p className="text-xs text-text-muted max-w-sm mx-auto mb-4">
+                  Browse the All Leaders directory to find verified traders and subscribe to their copy signals.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('all')}
+                  className="px-4 py-2 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-colors cursor-pointer"
+                >
+                  Browse Leaders
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Specific Highlighting when Following < 3 Accounts */}
+                {followingList.length < 3 && (
+                  <div className="p-3.5 rounded-lg bg-surface-raised border border-accent/30 flex items-center justify-between text-xs flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-accent" />
+                      <span className="text-text-primary font-medium">
+                        You are following <strong>{followingList.length}</strong> leader(s) (&lt; 3 accounts). Below are their full verified account numbers and Arkiv cryptographic relationship proofs.
+                      </span>
                     </div>
+                    <Badge variant="accent" className="text-[10px]">Active Arkiv TTL</Badge>
+                  </div>
+                )}
 
-                    {/* Action Button */}
-                    <div className="pt-2 border-t border-border">
-                      {leader.isFollowing ? (
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleUnfollow(leader.id)}
-                            disabled={unfollowingId === leader.id}
-                            className="flex-1 py-2 px-3 rounded-md bg-surface-raised hover:bg-semantic-danger/10 border border-border hover:border-semantic-danger/30 text-xs font-semibold text-semantic-danger transition-colors duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                          >
-                            {unfollowingId === leader.id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : null}
-                            <span>Unfollow</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenFollowModal(leader)}
-                          disabled={!leader.walletAddress}
-                          className="w-full py-2 px-3 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
-                        >
-                          <UserPlus className="w-3.5 h-3.5 stroke-[2.2]" />
-                          <span>Follow ({leader.subscriptionFee} ETH)</span>
-                        </button>
-                      )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {followingList.map((f) => {
+                    const leader = f.leaderId
+                    const targetLeaderId = leader?._id || f._id
+                    const accountAddr = f.leaderPublicKey || leader?.walletAddress || '0x0000000000000000000000000000000000000000'
+                    const handle = leader?.username ? `@${leader.username}` : 'Verified Leader'
+
+                    return (
+                      <Card key={f._id} className="overflow-hidden border border-border">
+                        <CardContent className="p-5 space-y-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-extrabold text-text-primary text-base">{handle}</h4>
+                                <Badge variant="success" className="text-[10px]">
+                                  <Check className="w-2.5 h-2.5" />
+                                  Following
+                                </Badge>
+                              </div>
+                              <div className="text-[11px] text-text-muted mt-0.5">
+                                Subscribed via Base Sepolia ({leader?.subscriptionFee ?? 0.001} ETH / 30d)
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleUnfollow(targetLeaderId)}
+                              disabled={unfollowingId === targetLeaderId}
+                              className="px-2.5 py-1 rounded bg-surface hover:bg-semantic-danger/10 border border-border hover:border-semantic-danger/30 text-xs font-semibold text-semantic-danger transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              {unfollowingId === targetLeaderId ? <Loader2 className="w-3 h-3 animate-spin inline" /> : 'Unfollow'}
+                            </button>
+                          </div>
+
+                          {/* Full Account Number / Address Block (Requested by User) */}
+                          <div className="p-3 rounded-md bg-surface-raised border border-border space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-text-muted">Account Number / Public Key:</span>
+                              <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300">
+                                ETHEREUM SEPOLIA
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 p-1.5 rounded bg-surface border border-border">
+                              <span className="mono tnum text-[11px] font-bold text-text-primary break-all select-all">
+                                {accountAddr}
+                              </span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(accountAddr, `acct-${f._id}`)}
+                                  className="copy-chip text-[10px] py-1 px-1.5"
+                                  title="Copy full account address"
+                                >
+                                  {copiedKey === `acct-${f._id}` ? <Check className="w-3 h-3 text-semantic-success" /> : <Copy className="w-3 h-3" />}
+                                </button>
+                                <a
+                                  href={getBaseScanAddressUrl(accountAddr)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[10px] p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary"
+                                  title="View on BaseScan"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </div>
+                            </div>
+
+                            {/* World ID Nullifier Hash */}
+                            <div className="flex justify-between items-center text-[11px] pt-1 border-t border-border/60">
+                              <span className="text-text-muted">Nullifier:</span>
+                              <span className="mono text-text-secondary">{truncateHash(f.leaderNullifier || leader?.nullifierHash, 10)}</span>
+                            </div>
+
+                            {/* Arkiv Entity Key */}
+                            {f.arkivEntityKey && (
+                              <div className="flex justify-between items-center text-[11px]">
+                                <span className="text-text-muted flex items-center gap-1">
+                                  <Database className="w-3 h-3 text-accent" />
+                                  Arkiv Relationship Key:
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <a
+                                    href={`https://rabdi.explorer.arkiv.network/entity/${f.arkivEntityKey}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mono text-blue-700 hover:text-blue-900 dark:text-accent font-bold underline underline-offset-2 flex items-center gap-1"
+                                  >
+                                    <span>{truncateHash(f.arkivEntityKey, 6)}</span>
+                                    <ExternalLink className="w-2.5 h-2.5" />
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+
+                            {f.expiresAt && (
+                              <div className="flex justify-between items-center text-[11px] text-text-muted">
+                                <span>Relationship Expiry:</span>
+                                <span className="tnum font-medium text-text-secondary">{new Date(f.expiresAt).toLocaleDateString()}</span>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* -----------------------------------------------------------------
+            VIEW 3: Followers Tab (< 3 Accounts Detailed Listing)
+            ----------------------------------------------------------------- */}
+        {activeTab === 'followers' && (
+          <div className="space-y-4">
+            {loadingSocial ? (
+              <div className="py-20 flex flex-col items-center justify-center gap-3 text-text-muted">
+                <Loader2 className="w-8 h-8 animate-spin text-accent" />
+                <p className="text-xs uppercase tracking-widest font-semibold">Loading Followers...</p>
+              </div>
+            ) : followersList.length === 0 ? (
+              <div className="surface p-12 text-center">
+                <Users className="w-10 h-10 text-text-muted mx-auto mb-3 stroke-[1.5]" />
+                <h3 className="text-base font-bold text-text-primary mb-1">No Followers Yet</h3>
+                <p className="text-xs text-text-muted max-w-sm mx-auto">
+                  When other verified World ID users follow your trading signals, their account numbers and Arkiv relationship proofs will appear here.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Specific Highlighting when Followers < 3 Accounts */}
+                {followersList.length < 3 && (
+                  <div className="p-3.5 rounded-lg bg-surface-raised border border-accent/30 flex items-center justify-between text-xs flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-accent" />
+                      <span className="text-text-primary font-medium">
+                        You have <strong>{followersList.length}</strong> active follower(s) (&lt; 3 accounts). Below are their full account numbers and encrypted signal access tokens.
+                      </span>
                     </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+                    <Badge variant="accent" className="text-[10px]">Signal Receivers</Badge>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {followersList.map((f) => {
+                    const follower = f.followerId
+                    const accountAddr = f.followerPublicKey || follower?.walletAddress || '0x0000000000000000000000000000000000000000'
+                    const handle = follower?.username ? `@${follower.username}` : 'Verified Follower'
+
+                    return (
+                      <Card key={f._id} className="overflow-hidden border border-border">
+                        <CardContent className="p-5 space-y-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-extrabold text-text-primary text-base">{handle}</h4>
+                                <Badge variant="accent" className="text-[10px]">
+                                  Active Follower
+                                </Badge>
+                              </div>
+                              <div className="text-[11px] text-text-muted mt-0.5">
+                                Access granted to your 10-minute encrypted ArkDB trading signals
+                              </div>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-semantic-success/15 text-semantic-success border border-semantic-success/30">
+                              VERIFIED HUMAN
+                            </span>
+                          </div>
+
+                          {/* Full Follower Account Number / Address Block (Requested by User) */}
+                          <div className="p-3 rounded-md bg-surface-raised border border-border space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] uppercase font-bold text-text-muted">Account Number / Public Key:</span>
+                              <span className="text-[9px] px-1.5 py-0.2 rounded font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
+                                FOLLOWER WALLET
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 p-1.5 rounded bg-surface border border-border">
+                              <span className="mono tnum text-[11px] font-bold text-text-primary break-all select-all">
+                                {accountAddr}
+                              </span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(accountAddr, `f-acct-${f._id}`)}
+                                  className="copy-chip text-[10px] py-1 px-1.5"
+                                  title="Copy follower account address"
+                                >
+                                  {copiedKey === `f-acct-${f._id}` ? <Check className="w-3 h-3 text-semantic-success" /> : <Copy className="w-3 h-3" />}
+                                </button>
+                                <a
+                                  href={getBaseScanAddressUrl(accountAddr)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[10px] p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary"
+                                  title="View on BaseScan"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </div>
+                            </div>
+
+                            {/* World ID Nullifier Hash */}
+                            <div className="flex justify-between items-center text-[11px] pt-1 border-t border-border/60">
+                              <span className="text-text-muted">Nullifier:</span>
+                              <span className="mono text-text-secondary">{truncateHash(f.followerNullifier || follower?.nullifierHash, 10)}</span>
+                            </div>
+
+                            {/* Arkiv Entity Key */}
+                            {f.arkivEntityKey && (
+                              <div className="flex justify-between items-center text-[11px]">
+                                <span className="text-text-muted flex items-center gap-1">
+                                  <Database className="w-3 h-3 text-accent" />
+                                  Arkiv Relationship Key:
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <a
+                                    href={`https://rabdi.explorer.arkiv.network/entity/${f.arkivEntityKey}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mono text-blue-700 hover:text-blue-900 dark:text-accent font-bold underline underline-offset-2 flex items-center gap-1"
+                                  >
+                                    <span>{truncateHash(f.arkivEntityKey, 6)}</span>
+                                    <ExternalLink className="w-2.5 h-2.5" />
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+
+                            {f.createdAt && (
+                              <div className="flex justify-between items-center text-[11px] text-text-muted">
+                                <span>Subscribed Since:</span>
+                                <span className="tnum font-medium text-text-secondary">{new Date(f.createdAt).toLocaleDateString()}</span>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 

@@ -154,3 +154,28 @@ npx expo start # Scan QR code with Expo Go or press 'w' for web view
 * **Backend API (Render):** `https://syndicate-backend-n3p9.onrender.com`
 * **Health Check:** `https://syndicate-backend-n3p9.onrender.com/health`
 * **World ID Auth Context:** `https://syndicate-backend-n3p9.onrender.com/api/auth/rp-context`
+
+---
+
+## 📦 Arkiv Protocol Integration (Judges Evaluation)
+
+* **Network:** Arkiv Rabdi Testnet
+* **Writing Relayer Address:** [`0x0962cC66c69426C32574447cF50fe9664fE94451`](https://rabdi.explorer.arkiv.network/address/0x0962cC66c69426C32574447cF50fe9664fE94451)
+* **Arkiv Rabdi Explorer:** [`https://rabdi.explorer.arkiv.network/entity-explorer`](https://rabdi.explorer.arkiv.network/entity-explorer)
+
+### 📑 Arkiv Track Documentation (25% Scoring Breakdown):
+1. [Schema Definitions (`arkiv/schema.md`)](./arkiv/schema.md) — `follower_relationships` (30d TTL), `trade_signals` (10m TTL), `trade_promises` (30d retention).
+2. [How Syndicate Uses Arkiv (`arkiv/how-you-use-arkiv.md`)](./arkiv/how-you-use-arkiv.md) — Architecture, writing keys, and live querying.
+3. [Why Arkiv (`arkiv/why-arkiv.md`)](./arkiv/why-arkiv.md) — Ephemeral state coordination vs. permanent L1 bloat.
+4. [Developer Friction & Feedback (`arkiv/friction.md`)](./arkiv/friction.md) — Actionable feedback on the SDK, schema builders, and emulator needs.
+5. [Ecosystem Reach (`arkiv/reach.md`)](./arkiv/reach.md) — Scaling to thousands of trading guilds and volume projections.
+
+---
+
+## 🛡️ Ethereum Foundation CROPS Framework
+
+* **Confidentiality:** Follower trade allocations and notes reside in a Kohaku Railgun zero-knowledge shielded pool.
+* **Ownership:** Leaders and followers hold self-custodied keys; trades execute via client-side ephemeral burner wallets.
+* **Privacy:** Trade moves are executed through unlinked single-use burners; outsiders cannot correlate a trader to their funding source.
+* **Scalability:** Offchain EIP-712 intent authorization on Definitive Flash paired with Base L2 execution eliminates gas friction.
+

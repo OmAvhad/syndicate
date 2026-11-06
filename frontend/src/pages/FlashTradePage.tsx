@@ -48,6 +48,7 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { logJudgeEvent } from '@/lib/judgeLogger'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { cn } from '@/lib/utils'
@@ -1114,6 +1115,24 @@ export default function FlashTradePage() {
       // Refresh balances immediately from blockchain
       await fetchBalances()
       addLog(`🎉 Real onchain swap complete! Trader spent $${spentUsd.toFixed(2)} USDC and received ${amountEth} WETH position on Ethereum Sepolia.`)
+
+      // Log for Judge Verification
+      logJudgeEvent({
+        category: 'ONCHAIN_TRADE',
+        title: `Definitive Flash Two-Leg Atomic Swap on Ethereum Sepolia`,
+        details: {
+          burnerAddress: account.address,
+          usdcSpent: `$${spentUsd.toFixed(2)} USDC`,
+          wethPositionReceived: `${amountEth} WETH`,
+          blockNumber: Number(receipt.blockNumber),
+          gasUsed: (receipt.gasUsed + wethReceipt.gasUsed).toString(),
+          settlementVault: `${FLASH_TRADE_POOL_ADDRESS} (FlashTradePool)`,
+        },
+        links: [
+          { label: `Etherscan Leg 1 (USDC Transfer: ${txHash.slice(0, 10)}...)`, url: explorerUrl },
+          { label: `Etherscan Leg 2 (WETH Delivery: ${wethTxHash.slice(0, 10)}...)`, url: `https://sepolia.etherscan.io/tx/${wethTxHash}` },
+        ],
+      })
     } catch (err: unknown) {
       const e = err as Error
       console.error('Onchain execution error:', e)
@@ -1225,6 +1244,23 @@ export default function FlashTradePage() {
           calldata: `0xa9059cbb (release $${formatUnits(amountToTransfer, 6)} USDC to ${recipient.slice(0, 8)}...)`,
           leg: legName,
           oraclePrice: `$${currentMarketPrice.toLocaleString()}`,
+        })
+
+        // Log Exit Settlement for Judges
+        logJudgeEvent({
+          category: 'EXIT_SETTLEMENT',
+          title: `Flash Trade Settlement Exit Mined on Ethereum Sepolia (${legName})`,
+          details: {
+            oraclePrice: `$${currentMarketPrice.toLocaleString()}`,
+            usdcReleasedWithProfit: `$${formatUnits(amountToTransfer, 6)} USDC`,
+            recipientAddress: recipient,
+            blockNumber: Number(receipt.blockNumber),
+            gasUsed: (receipt.gasUsed + returnWethGas).toString(),
+            vault: FLASH_TRADE_POOL_ADDRESS,
+          },
+          links: [
+            { label: `Etherscan Exit Tx (${txHash.slice(0, 10)}...)`, url: explorerUrl },
+          ],
         })
       } else {
         // Fallback: If Treasury has 0 USDC, unwrap any held WETH
@@ -1360,6 +1396,26 @@ export default function FlashTradePage() {
 
       setBaseEip712Result(solverPayload)
       addBaseLog(`🎉 Flash order intent validated! Ready for Definitive Flash solvers on Base Mainnet.`)
+
+      // Log Base Mainnet Intent for Judges
+      logJudgeEvent({
+        category: 'BASE_INTENT',
+        title: `Definitive Flash Offchain EIP-712 Order Signed ($0 Gas on Base Mainnet)`,
+        details: {
+          chain: 'Base Mainnet (Chain ID: 8453)',
+          signingWallet: baseAccount.address,
+          router: BASE_DEFINITIVE_FLASH_ROUTER,
+          orderSide: baseTradeSide,
+          pair: baseTradePair,
+          amountIn: baseAmount,
+          eip712Signature: `${signature.slice(0, 16)}...${signature.slice(-8)}`,
+          arkivPreTradeCommitmentHash: commitmentHash,
+          solverStatus: 'READY_FOR_SOLVER_EXECUTION',
+        },
+        links: [
+          { label: `BaseScan Router Contract`, url: `https://basescan.org/address/${BASE_DEFINITIVE_FLASH_ROUTER}` },
+        ],
+      })
     } catch (err: unknown) {
       const e = err as Error
       console.error('Base Flash signing error:', e)

@@ -5,6 +5,7 @@ import { decryptWithMetaMask } from '@/lib/network'
 
 export interface TradeSignalItem {
   signalId: string
+  tradeIndex?: number
   leaderPublicKey: string
   leaderUsername: string
   symbol: string
@@ -35,7 +36,7 @@ interface SignalContextType {
   closeCopyModal: () => void
   dismissSignal: (signalId: string) => void
   decryptSignal: (signalId: string) => Promise<{ success: boolean; error?: string }>
-  executeCopyTrade: (signalId: string, customAmount: number) => Promise<{ success: boolean; error?: string; tradeId?: string }>
+  executeCopyTrade: (signalId: string, customAmount: number, executionTxHash?: string) => Promise<{ success: boolean; error?: string; tradeId?: string }>
   isConnected: boolean
   refreshSignals: () => Promise<void>
 }
@@ -290,7 +291,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
   }
 
   // Execute trade order for follower
-  const executeCopyTrade = async (signalId: string, customAmount: number) => {
+  const executeCopyTrade = async (signalId: string, customAmount: number, executionTxHash?: string) => {
     const target = signals.find((s) => s.signalId === signalId) || selectedSignal
     if (!target) return { success: false, error: 'Signal not found or expired' }
 
@@ -305,14 +306,16 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
       const res = await api.post('/api/trades/execute', {
         symbol: target.symbol,
         side: target.side,
-        orderType: target.orderType,
+        orderType: target.orderType || 'BRACKET',
         limit: target.limit,
         amount: customAmount,
         stopLoss: target.stopLoss,
         target: target.target,
         burnerAccountAddress: target.burnerAccountAddress,
+        tradeIndex: target.tradeIndex || 1,
         isCopyTrade: true,
         originalSignalId: target.signalId,
+        executionTxHash: executionTxHash || undefined,
       })
 
       if (res.data?.success) {

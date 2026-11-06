@@ -21,6 +21,11 @@ const tradeSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Trade',
     },
+    tradeIndex: {
+      type: Number,
+      default: 1,
+      index: true,
+    },
     symbol: {
       type: String,
       required: true,
@@ -34,7 +39,7 @@ const tradeSchema = new mongoose.Schema(
     },
     orderType: {
       type: String,
-      enum: ['LIMIT', 'MARKET'],
+      enum: ['LIMIT', 'MARKET', 'BRACKET', 'TWAP'],
       default: 'LIMIT',
     },
     limit: {

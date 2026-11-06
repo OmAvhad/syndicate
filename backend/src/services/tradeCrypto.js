@@ -32,6 +32,7 @@ export function encryptForMetaMask(tradeData, encryptionPublicKey) {
 export function hashTradePayload(tradeData) {
   const secret = getHashSecret();
   const normalized = {
+    tradeIndex: tradeData.tradeIndex ? Number(tradeData.tradeIndex) : 1,
     symbol: tradeData.symbol?.trim().toUpperCase(),
     side: tradeData.side?.trim().toUpperCase(),
     orderType: tradeData.orderType?.trim().toUpperCase() || 'LIMIT',
