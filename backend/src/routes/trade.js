@@ -319,6 +319,7 @@ router.post('/signal', async (req, res) => {
       // Payload delivered to the follower
       const signalMessage = {
         signalId,
+        followerPublicKey: follower.walletAddress,
         tradeIndex: effectiveTradeIndex,
         leaderPublicKey: leader.walletAddress,
         leaderUsername: leader.username || 'Verified Leader',
@@ -396,6 +397,7 @@ router.get('/signals/active', async (req, res) => {
         orderType: s.tradePayload?.orderType,
         requiresMetaMaskDecrypt: Boolean(s.requiresMetaMaskDecrypt),
         encryptedPayloadHex: s.encryptedPayloadHex || null,
+        followerPublicKey: s.followerPublicKey,
         limit: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.limit,
         amount: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.amount,
         stopLoss: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.stopLoss,

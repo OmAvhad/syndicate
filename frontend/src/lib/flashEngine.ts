@@ -11,8 +11,9 @@ import {
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { sepolia } from 'viem/chains'
+import { sepoliaTransport } from './sepoliaRpc'
 
-export const RPC_ENDPOINT = 'https://ethereum-sepolia-rpc.publicnode.com'
+export const RPC_ENDPOINT = import.meta.env.VITE_SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'
 
 export const USDC_SEPOLIA: Address = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'
 export const WETH_SEPOLIA: Address = '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9'
@@ -88,7 +89,7 @@ export const WETH_ABI = [
 
 export const publicClient = createPublicClient({
   chain: sepolia,
-  transport: http(RPC_ENDPOINT),
+  transport: sepoliaTransport(),
 })
 
 export interface OnchainExecutionResult {
@@ -125,14 +126,14 @@ export async function executeTwoLegEntrySwap({
   const traderWallet = createWalletClient({
     account: traderAccount,
     chain: sepolia,
-    transport: http(RPC_ENDPOINT),
+    transport: sepoliaTransport(),
   })
 
   const poolAccount = privateKeyToAccount(FLASH_TRADE_POOL_KEY)
   const poolWallet = createWalletClient({
     account: poolAccount,
     chain: sepolia,
-    transport: http(RPC_ENDPOINT),
+    transport: sepoliaTransport(),
   })
 
   const usdcBigInt = parseUnits(usdcAmountNumber.toFixed(2), 6)
@@ -164,6 +165,7 @@ export async function executeTwoLegEntrySwap({
 
   log(`[Onchain Leg 1/2] USDC tx broadcasted: ${leg1TxHash}`)
   const receipt1 = await publicClient.waitForTransactionReceipt({ hash: leg1TxHash })
+  if (receipt1.status !== 'success') throw new Error(`Entry USDC transfer reverted: ${leg1TxHash}`)
   log(`✅ Leg 1 Confirmed in Block #${receipt1.blockNumber}! Gas used: ${receipt1.gasUsed.toString()}`)
 
   // Ensure Vault has enough WETH
@@ -197,6 +199,7 @@ export async function executeTwoLegEntrySwap({
 
   log(`[Onchain Leg 2/2] WETH tx broadcasted: ${leg2TxHash}`)
   const receipt2 = await publicClient.waitForTransactionReceipt({ hash: leg2TxHash })
+  if (receipt2.status !== 'success') throw new Error(`Entry WETH delivery reverted: ${leg2TxHash}`)
   log(`✅ Leg 2 Confirmed in Block #${receipt2.blockNumber}! Trader received ${wethAmountNumber} WETH.`)
 
   return {
@@ -234,14 +237,14 @@ export async function executeTwoLegExitSwap({
   const traderWallet = createWalletClient({
     account: traderAccount,
     chain: sepolia,
-    transport: http(RPC_ENDPOINT),
+    transport: sepoliaTransport(),
   })
 
   const poolAccount = privateKeyToAccount(FLASH_TRADE_POOL_KEY)
   const poolWallet = createWalletClient({
     account: poolAccount,
     chain: sepolia,
-    transport: http(RPC_ENDPOINT),
+    transport: sepoliaTransport(),
   })
 
   const wethBigInt = parseEther(wethAmountNumber.toFixed(6))
@@ -259,6 +262,7 @@ export async function executeTwoLegExitSwap({
 
   log(`[Exit Leg 1/2] WETH return broadcasted: ${leg1TxHash}`)
   const receipt1 = await publicClient.waitForTransactionReceipt({ hash: leg1TxHash })
+  if (receipt1.status !== 'success') throw new Error(`Exit WETH transfer reverted: ${leg1TxHash}`)
   log(`✅ Exit Leg 1 Confirmed in Block #${receipt1.blockNumber}!`)
 
   // Exit Leg 2: Vault -> Trader (USDC with profit)
@@ -272,6 +276,7 @@ export async function executeTwoLegExitSwap({
 
   log(`[Exit Leg 2/2] USDC release broadcasted: ${leg2TxHash}`)
   const receipt2 = await publicClient.waitForTransactionReceipt({ hash: leg2TxHash })
+  if (receipt2.status !== 'success') throw new Error(`Exit USDC delivery reverted: ${leg2TxHash}`)
   log(`✅ Exit Leg 2 Confirmed in Block #${receipt2.blockNumber}! Released $${usdcReturnAmountNumber.toFixed(2)} USDC to trader.`)
 
   return {

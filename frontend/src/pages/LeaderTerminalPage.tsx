@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
+import { formatEther, parseUnits } from 'viem'
+import type { PoolView } from '@/lib/shielded/pool'
+import type { FundingQuote, TradingBurner } from '@/lib/shielded/tradeFunding'
+import { scopeKey } from '@/lib/shielded/storage'
+import { readCachedBalance } from '@/lib/shielded/balanceCache'
+import { artifactsReady, prepareArtifacts, requireArtifactsReady, artifactTotalBytes } from '@/lib/shielded/artifactFetch'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
@@ -8,8 +15,6 @@ import {
   executeTwoLegExitSwap,
   type OnchainExecutionResult,
   fetchSepoliaBalances,
-  LEADER_BURNER_ADDRESS,
-  LEADER_BURNER_KEY,
   FLASH_TRADE_POOL_ADDRESS,
 } from '@/lib/flashEngine'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
@@ -55,7 +60,97 @@ export default function LeaderTerminalPage() {
   const [amount, setAmount] = useState('3.00')
   const [stopLoss, setStopLoss] = useState('2800')
   const [target, setTarget] = useState('3350')
-  const [burnerAddress, setBurnerAddress] = useState<string>(LEADER_BURNER_ADDRESS)
+  const [burnerAddress, setBurnerAddress] = useState<string>('')
+  const burnerRef = useRef<TradingBurner | null>(null)
+  const submittingRef = useRef(false)
+  const scope = user?.walletAddress ? { userId: user.id, walletAddress: user.walletAddress } : null
+  const [privateView, setPrivateView] = useState<PoolView | null>(null)
+  const [fundingQuote, setFundingQuote] = useState<FundingQuote | null>(null)
+  const [poolError, setPoolError] = useState('')
+  const [poolLoading, setPoolLoading] = useState(false)
+  const [rpcStatus, setRpcStatus] = useState('')
+  useEffect(() => {
+    const handler = (event: Event) => setRpcStatus((event as CustomEvent<string>).detail)
+    window.addEventListener('syndicate:rpc-status', handler)
+    return () => window.removeEventListener('syndicate:rpc-status', handler)
+  }, [])
+  const [shortfall, setShortfall] = useState<string | null>(null)
+  const [fundingEvidence, setFundingEvidence] = useState<{ operation?: string; transaction?: string }>({})
+  const [proofReady, setProofReady] = useState(false)
+  const [proofPreparing, setProofPreparing] = useState(false)
+  const [proofMessage, setProofMessage] = useState('Checking proof files…')
+  useEffect(() => {
+    let active = true
+    void artifactsReady().then(ready => {
+      if (active) { setProofReady(ready); setProofMessage(ready ? 'Proof files ready on this device.' : 'Prepare proof files once before trading.') }
+    }).catch(error => { if (active) setProofMessage(error.message) })
+    return () => { active = false }
+  }, [])
+  const prepareProofFiles = async () => {
+    setProofPreparing(true); setProofReady(false)
+    setProofMessage('Preparing proof files…')
+    try {
+      await prepareArtifacts((loaded, total, files) => setProofMessage(`Preparing proof files: ${Math.round(loaded / total * 100)}% · ${files}/75 files · ${(loaded / 1048576).toFixed(1)} MiB cached`))
+      setProofReady(true); setProofMessage('Proof files ready on this device. Trading uses the cached files.')
+    } catch (error) { setProofMessage((error as Error).message) }
+    finally { setProofPreparing(false) }
+  }
+  const refreshPrivate = useCallback(async (force = false) => {
+    if (!user?.walletAddress) return
+    setPoolLoading(true); setPoolError('')
+    const currentScope = { userId: user.id, walletAddress: user.walletAddress }
+    setPrivateView(readCachedBalance(currentScope))
+    try {
+      const pool = await import('@/lib/shielded/pool')
+      const view = await pool.syncPool(currentScope, { force })
+      setPrivateView(view)
+    } catch (error) { setPoolError((error as Error).message) }
+    finally { setPoolLoading(false) }
+  }, [user?.id, user?.walletAddress])
+  useEffect(() => { void refreshPrivate() }, [refreshPrivate])
+  useEffect(() => {
+    let cancelled = false
+    setFundingQuote(null)
+    const timer = setTimeout(async () => {
+      try {
+        const service = await import('@/lib/shielded/tradeFunding')
+        const quote = await service.quoteTradeFunding(amount)
+        if (!cancelled) setFundingQuote(quote)
+      } catch (error) { if (!cancelled) setPoolError((error as Error).message) }
+    }, 500)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [amount])
+  useEffect(() => {
+    if (!privateView || !fundingQuote) { setShortfall(null); return }
+    let cancelled = false
+    void import('@/lib/shielded/tradeFunding').then(service => {
+      const usdc = parseUnits(privateView.balances.find(b => b.symbol === 'USDC')?.amount || '0', 6)
+      const weth = parseUnits(privateView.balances.find(b => b.symbol === 'WETH')?.amount || '0', 18)
+      if (!cancelled) setShortfall(service.fundingShortfall(fundingQuote, usdc, weth))
+    })
+    return () => { cancelled = true }
+  }, [privateView, fundingQuote])
+  useEffect(() => {
+    burnerRef.current = null
+    setBurnerAddress('')
+    if (!scope) return
+    let cancelled = false
+    void import('@/lib/shielded/tradeFunding').then(service => {
+      const saved = service.loadTradingBurner(scope)
+      if (cancelled || !saved) return
+      burnerRef.current = saved
+      setBurnerAddress(saved.address)
+      setAmount(saved.quote.capital)
+      const inputs = JSON.parse(saved.inputs)
+      setSymbol(inputs.symbol); setSide(inputs.side); setOrderType(inputs.orderType)
+      setLimit(inputs.limit); setStopLoss(inputs.stopLoss); setTarget(inputs.target)
+      if (saved.entry) setOnchainResult(saved.entry)
+      if (saved.promise) setPromiseData(saved.promise)
+      if (saved.stage === 'open') setStep('completed')
+      setFundingEvidence({ operation: saved.userOpHash, transaction: saved.fundingTxHash })
+    }).catch(error => { if (!cancelled) setPoolError(error.message) })
+    return () => { cancelled = true }
+  }, [user?.id, user?.walletAddress])
 
   // Live Onchain Balances (Burner & Vault)
   const [burnerBalances, setBurnerBalances] = useState<{ eth: string; usdc: string; weth: string } | null>(null)
@@ -67,10 +162,10 @@ export default function LeaderTerminalPage() {
       setIsLoadingBalances(true)
       const targetBurner = (burnerAddress && burnerAddress.startsWith('0x') && burnerAddress.length === 42)
         ? (burnerAddress as `0x${string}`)
-        : LEADER_BURNER_ADDRESS
+        : null
 
       const [bBal, vBal] = await Promise.all([
-        fetchSepoliaBalances(targetBurner),
+        targetBurner ? fetchSepoliaBalances(targetBurner) : Promise.resolve({ eth: '0', usdc: '0', weth: '0' }),
         fetchSepoliaBalances(FLASH_TRADE_POOL_ADDRESS),
       ])
       setBurnerBalances(bBal)
@@ -88,7 +183,7 @@ export default function LeaderTerminalPage() {
 
   // Multi-step lifecycle state
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [step, setStep] = useState<'idle' | 'promising' | 'executing_onchain' | 'signaling' | 'completed' | 'error'>('idle')
+  const [step, setStep] = useState<'idle' | 'funding' | 'promising' | 'executing_onchain' | 'signaling' | 'completed' | 'error'>('idle')
   const [stepMessage, setStepMessage] = useState<string>('')
   const [promiseData, setPromiseData] = useState<{ promiseId: string; payloadHash: string; tradeIndex?: number; arkivEntityKey?: string } | null>(null)
   const [onchainResult, setOnchainResult] = useState<OnchainExecutionResult | null>(null)
@@ -124,15 +219,6 @@ export default function LeaderTerminalPage() {
     setTradeLogs(prev => [...prev, { time, type, message, link }])
   }, [])
 
-  // Generate a random burner account address
-  const handleGenerateBurner = () => {
-    const chars = '0123456789abcdef'
-    let addr = '0x'
-    for (let i = 0; i < 40; i++) {
-      addr += chars[Math.floor(Math.random() * chars.length)]
-    }
-    setBurnerAddress(addr)
-  }
 
   // Quick fill price based on selected symbol
   const handleSelectSymbol = (sym: string) => {
@@ -162,6 +248,15 @@ export default function LeaderTerminalPage() {
   // 3. Trigger simultaneous Execution record & Follower Encrypted Signals (10-min Arkiv TTL)
   const handlePlaceOrderAndSignal = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!scope || !navigator.locks) { setErrorMessage('Link your wallet and use a browser with Web Locks support.'); return }
+    await navigator.locks.request(`${scopeKey(scope)}:leader-execution`, { mode: 'exclusive', ifAvailable: true }, async lock => {
+      if (!lock) { setErrorMessage('This leader trade is already running in another tab.'); return }
+      await executeLeaderFlow(e)
+    })
+  }
+  const executeLeaderFlow = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (submittingRef.current) return
 
     if (!user?.walletAddress) {
       setErrorMessage('Please connect your MetaMask wallet before placing leader trades.')
@@ -169,11 +264,34 @@ export default function LeaderTerminalPage() {
     }
 
     try {
+      submittingRef.current = true
       setIsSubmitting(true)
       setErrorMessage(null)
       setTradeLogs([])
+      setStep('funding')
+      setStepMessage('Checking shielded funds and creating a local burner…')
+
+      const funding = await import('@/lib/shielded/tradeFunding')
+      const currentScope = { userId: user.id, walletAddress: user.walletAddress }
+      const inputs = JSON.stringify({ symbol, side, orderType, limit, amount, stopLoss, target })
+      let burner = burnerRef.current || funding.loadTradingBurner(currentScope)
+      if (burner && burner.stage === 'closed') burner = null
+      if (burner && burner.inputs !== inputs) throw new Error('A saved trade already has a burner. Restore its original parameters to resume funding; its key has been retained.')
+      if (burner?.stage === 'open') throw new Error('This position is already open. Use its exit control before starting a new position.')
+      if (burner?.stage === 'entry-pending') throw new Error('An entry may already be submitted. Inspect this burner on Etherscan before retrying; automatic duplicate execution is blocked.')
+      if (!burner) {
+        await requireArtifactsReady()
+        const quote = await funding.quoteTradeFunding(amount)
+        burner = funding.createTradingBurner(currentScope, inputs, quote)
+      }
+      burnerRef.current = burner
+      setBurnerAddress(burner.address)
+      await funding.fundTradingBurner(currentScope, burner, message => { setStepMessage(message); setFundingQuote({ ...burner.quote }); addTradeLog('info', message) })
+      funding.assertTradeScope(currentScope)
+      setFundingEvidence({ operation: burner.userOpHash, transaction: burner.fundingTxHash })
+      addTradeLog('success', `Burner ${burner.address} funded through Pimlico.`, burner.fundingTxHash ? { label: 'Funding receipt', url: `https://sepolia.etherscan.io/tx/${burner.fundingTxHash}` } : undefined)
       setStep('promising')
-      setStepMessage('Sealing Trade Promise on Arkiv Rabdi testnet...')
+      setStepMessage('Funding confirmed. Sealing the trade promise…')
 
       const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
       const wethPos = 0.001
@@ -188,14 +306,14 @@ export default function LeaderTerminalPage() {
         amount: usdcCapital,
         stopLoss: Number(stopLoss),
         target: Number(target),
-        burnerAccountAddress: burnerAddress || LEADER_BURNER_ADDRESS,
+        burnerAccountAddress: burner.address,
       }
 
       console.log('[Terminal] Step 1: Requesting Promise Commitment from /api/trades/promise...')
       addTradeLog('info', `Sealing sequential Trade Promise on Arkiv Rabdi testnet...`)
 
       // Step 1: Trigger /promise API
-      const promiseRes = await api.post('/api/trades/promise', tradePayload)
+      const promiseRes = burner.promise ? { data: { success: true, ...burner.promise } } : await api.post('/api/trades/promise', tradePayload)
       if (!promiseRes.data?.success) {
         throw new Error(promiseRes.data?.error || 'Failed to seal trade promise')
       }
@@ -207,6 +325,8 @@ export default function LeaderTerminalPage() {
         arkivEntityKey: promiseRes.data.arkivEntityKey,
       }
       setPromiseData(pData)
+      burner.promise = pData
+      funding.saveTradingBurner(currentScope, burner)
 
       console.log('[Terminal] Promise Committed with Sequential Index:', pData)
       if (pData.arkivEntityKey) {
@@ -246,10 +366,13 @@ export default function LeaderTerminalPage() {
       // Step 2: Real Onchain Execution on Ethereum Sepolia
       setStep('executing_onchain')
       setStepMessage('Executing real onchain two-leg swap (USDC ↔ WETH) on Ethereum Sepolia...')
-      addTradeLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via burner ${truncateHash(LEADER_BURNER_ADDRESS, 6)}...`)
+      addTradeLog('onchain', `Executing two-leg transfer demo on Ethereum Sepolia via burner ${truncateHash(burner.address, 6)}...`)
+      funding.assertTradeScope(currentScope)
+      burner.stage = 'entry-pending'
+      funding.saveTradingBurner(currentScope, burner)
 
       const onchainRes = await executeTwoLegEntrySwap({
-        traderKey: LEADER_BURNER_KEY,
+        traderKey: burner.privateKey,
         usdcAmountNumber: usdcCapital,
         wethAmountNumber: wethPos,
         onLog: (msg) => {
@@ -262,6 +385,9 @@ export default function LeaderTerminalPage() {
         },
       })
       setOnchainResult(onchainRes)
+      burner.entry = onchainRes
+      burner.stage = 'open'
+      funding.saveTradingBurner(currentScope, burner)
 
       addTradeLog(
         'onchain',
@@ -359,10 +485,15 @@ export default function LeaderTerminalPage() {
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string }
       console.error('[Terminal] Error in order lifecycle:', e)
+      if (e?.message?.toLowerCase().includes('proof file')) {
+        setProofReady(false)
+        setProofMessage(e.message)
+      }
       setErrorMessage(e?.response?.data?.error || e?.message || 'Trade flow failed')
       addTradeLog('warn', `Error: ${e?.response?.data?.error || e?.message || 'Trade flow failed'}`)
       setStep('error')
     } finally {
+      submittingRef.current = false
       setIsSubmitting(false)
     }
   }
@@ -370,6 +501,7 @@ export default function LeaderTerminalPage() {
   // Trigger onchain exit settlement (Take-Profit hit at $3,350)
   const handleTriggerTakeProfitExit = async () => {
     try {
+      if (!scope || !burnerRef.current?.entry) throw new Error('Restore the local burner for this open position first.')
       setIsExiting(true)
       setErrorMessage(null)
       const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
@@ -382,7 +514,7 @@ export default function LeaderTerminalPage() {
       addTradeLog('onchain', `Returning 0.001 WETH position to FlashTradePool Vault...`)
 
       const exitReceipt = await executeTwoLegExitSwap({
-        traderKey: LEADER_BURNER_KEY,
+        traderKey: burnerRef.current.privateKey,
         wethAmountNumber: 0.001,
         usdcReturnAmountNumber: profitUsdc,
         onLog: (msg) => {
@@ -396,6 +528,9 @@ export default function LeaderTerminalPage() {
       })
 
       setExitResult(exitReceipt)
+      burnerRef.current.stage = 'closed'
+      const funding = await import('@/lib/shielded/tradeFunding')
+      funding.saveTradingBurner(scope, burnerRef.current)
       await loadBalances()
       setTimeout(() => { loadBalances() }, 2500)
 
@@ -435,6 +570,13 @@ export default function LeaderTerminalPage() {
   }
 
   const handleReset = () => {
+    if (burnerRef.current && burnerRef.current.stage !== 'closed') {
+      setErrorMessage('This burner still has a pending funding operation or open position. Its saved keys and state must be recovered before starting another trade.')
+      return
+    }
+    burnerRef.current = null
+    setBurnerAddress('')
+    if (scope) localStorage.removeItem(`${scopeKey(scope)}:active-trade`)
     setStep('idle')
     setPromiseData(null)
     setOnchainResult(null)
@@ -494,6 +636,30 @@ export default function LeaderTerminalPage() {
           </div>
         </div>
 
+        <Card>
+          <CardHeader><CardTitle>Your shielded trading balance</CardTitle><CardDescription>Ethereum Sepolia · USDC capital and WETH for withdrawal fees and the burner's native gas reserve.</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
+              <p className="text-sm font-semibold">Proof files · {proofReady ? 'Ready' : proofPreparing ? 'Preparing' : 'Preparation required'}</p>
+              <p role="status" aria-live="polite" className="text-xs text-text-secondary">{proofMessage}</p>
+              {!proofReady && <button type="button" onClick={() => void prepareProofFiles()} disabled={proofPreparing || isSubmitting} className="text-xs text-accent disabled:opacity-50">{proofPreparing ? 'Preparing…' : `Prepare proof files (${(artifactTotalBytes / 1048576).toFixed(0)} MiB, once)`}</button>}
+              <p className="text-xs text-text-muted">Public proving files are served by this app and saved in your browser. Keep this page open during preparation. They contain no wallet secrets.</p>
+            </div>
+            <div className="flex flex-wrap gap-6 items-center">
+              {['USDC', 'WETH'].map(token => <div key={token}><p className="text-xs text-text-muted">Private {token}</p><p className="mono tnum text-lg">{privateView?.balances.find(b => b.symbol === token)?.amount ?? '—'}</p></div>)}
+              <button type="button" disabled={poolLoading || isSubmitting} onClick={() => void refreshPrivate(true)} className="text-accent text-xs disabled:opacity-50">{poolLoading ? 'Synchronizing notes…' : 'Refresh private balance'}</button>
+              <Link to="/" className="text-accent text-xs underline">Top up on dashboard</Link>
+            </div>
+            {privateView && <p className="text-xs text-text-muted">Last synchronized: {new Date(privateView.syncedAt).toLocaleString()}{poolLoading ? ' · Updating in background…' : ''}. Funding always rechecks spendable notes.</p>}
+            {fundingQuote && <p className="text-xs text-text-secondary">Estimated requirement: {(Number(fundingQuote.grossUsdc) / 1e6).toFixed(6)} USDC + {formatEther(BigInt(fundingQuote.requiredWeth))} WETH. Includes {formatEther(BigInt(fundingQuote.nativeReserve))} ETH for entry/exit gas and a {formatEther(BigInt(fundingQuote.feeReserve))} WETH withdrawal reserve. Pimlico checks the operation estimate before submission.</p>}
+            {shortfall && <p role="alert" className="rounded-md p-3 border border-semantic-warning/40 text-semantic-warning text-sm">{shortfall} <Link to="/" className="underline">Please top up.</Link></p>}
+            {poolError && <p role="alert" className="text-semantic-warning text-xs">{poolError}</p>}
+            {rpcStatus && <p role="status" className="text-semantic-warning text-xs">{rpcStatus}</p>}
+            <p className="text-xs text-text-muted">On submit, a fresh burner is saved locally, signs its own funding UserOperation and receives funds through Pimlico. The promise is created after funding confirmation. Gas reserves are estimates; unused funds remain in the burner.</p>
+            {fundingEvidence.operation && <p className="mono text-xs break-all">Funding UserOperation: {fundingEvidence.operation}</p>}
+            {fundingEvidence.transaction && <a href={`https://sepolia.etherscan.io/tx/${fundingEvidence.transaction}`} target="_blank" rel="noopener noreferrer" className="text-accent text-xs underline">View confirmed funding transaction</a>}
+          </CardContent>
+        </Card>
         {/* Two-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
@@ -564,7 +730,8 @@ export default function LeaderTerminalPage() {
                   </div>
                 </div>
 
-                <form onSubmit={handlePlaceOrderAndSignal} className="space-y-5">
+                <form onSubmit={handlePlaceOrderAndSignal}>
+                <fieldset disabled={isSubmitting} className="space-y-5">
                   
                   {/* Symbol Quick Pills */}
                   <div>
@@ -720,26 +887,15 @@ export default function LeaderTerminalPage() {
                   {/* Burner Account Address */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
+                      <p className="block text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
                         <Flame className="w-3.5 h-3.5 text-accent" />
-                        <span>Burner Execution Account (Optional)</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleGenerateBurner}
-                        className="text-[11px] font-semibold text-accent hover:underline flex items-center gap-1"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Generate Burner</span>
-                      </button>
+                        <span>Local per-trade burner</span>
+                      </p>
                     </div>
-                    <input
-                      type="text"
-                      placeholder="0x... (Execution burner wallet or leave blank to use connected wallet)"
-                      value={burnerAddress}
-                      onChange={(e) => setBurnerAddress(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-xs mono tnum placeholder:text-text-muted focus:border-accent focus:outline-none transition-colors"
-                    />
+                    <div className="rounded-md bg-surface-raised border border-border px-3.5 py-3 space-y-2" role="status" aria-live="polite">
+                      <p className="text-xs text-text-secondary">{burnerAddress ? 'This trade’s burner was created and saved on this device.' : 'A new burner will be created automatically when you submit this trade. Its address will appear here.'}</p>
+                      {burnerAddress && <p className="mono tnum text-xs text-accent break-all select-all">{burnerAddress}</p>}
+                    </div>
                   </div>
 
                   {errorMessage && (
@@ -751,7 +907,7 @@ export default function LeaderTerminalPage() {
                   {/* Action Button */}
                   <button
                     type="submit"
-                    disabled={isSubmitting || !user?.walletAddress}
+                    disabled={isSubmitting || !user?.walletAddress || (!proofReady && !burnerRef.current?.userOpHash && !burnerRef.current?.signedOperation) || (!burnerRef.current && (!privateView || !fundingQuote || !!shortfall))}
                     className="w-full py-3.5 px-4 rounded-md font-bold text-xs text-text-inverse bg-accent hover:bg-[#d4f885] active:translate-y-0 transition-all duration-fast flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_14px_rgba(198,243,106,0.2)]"
                   >
                     {isSubmitting ? (
@@ -762,10 +918,11 @@ export default function LeaderTerminalPage() {
                     ) : (
                       <>
                         <Radio className="w-4 h-4 text-text-inverse stroke-[2.2]" />
-                        <span>Commit Promise & Execute Real Onchain Flash Trade</span>
+                        <span>Fund Burner, Commit Promise & Execute Trade</span>
                       </>
                     )}
                   </button>
+                </fieldset>
                 </form>
               </CardContent>
             </Card>
@@ -779,7 +936,7 @@ export default function LeaderTerminalPage() {
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-accent" />
-                  <CardTitle>Three-Step Execution Protocol</CardTitle>
+                  <CardTitle>Funding & Execution Protocol</CardTitle>
                 </div>
                 <CardDescription>
                   How the syndicate executes onchain without leaking the leader's identity.
@@ -788,6 +945,11 @@ export default function LeaderTerminalPage() {
               <CardContent className="space-y-3.5 text-xs">
                 
                 {/* Step 1 indicator */}
+                <div className={`p-3.5 rounded-md border ${step === 'funding' ? 'border-accent bg-accent-soft' : 'border-border bg-surface-raised'}`}>
+                  <p className="font-semibold mb-1">0. Fund a fresh local burner through Pimlico</p>
+                  <p className="text-[11px]">The recipient burner signs the UserOperation. The pool supplies USDC and native gas; shielded WETH pays the withdrawal fee.</p>
+                  {step === 'funding' && <p role="status" className="text-xs text-accent mt-2">{stepMessage}</p>}
+                </div>
                 <div className={`p-3.5 rounded-md border transition-all ${
                   step === 'promising'
                     ? 'bg-accent-soft border-accent text-text-primary'

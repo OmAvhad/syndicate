@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { formatDate, truncateHash } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import WalletConnectButton from '@/components/WalletConnectButton'
+import ShieldedPoolCard from '@/components/ShieldedPoolCard'
 import { getBaseScanAddressUrl } from '@/lib/network'
 import {
   Users,
@@ -267,6 +268,8 @@ export default function Dashboard() {
             })}
           </div>
         </div>
+
+        {user && <ShieldedPoolCard key={`${user.id}:${user.walletAddress || ''}`} userId={user.id} walletAddress={user.walletAddress} />}
 
         {/* Two-Column Information Architecture */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

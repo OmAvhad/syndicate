@@ -125,6 +125,9 @@ router.post('/wallet', async (req, res) => {
       walletAddress: trimmed,
       walletConnectedAt: now,
     };
+    const previous = await User.findById(req.user.userId).select('walletAddress');
+    if (!previous) return res.status(404).json({ error: 'User not found' });
+    if (previous.walletAddress?.toLowerCase() !== trimmed) updateFields.encryptionPublicKey = null;
 
     if (encryptionPublicKey && typeof encryptionPublicKey === 'string') {
       updateFields.encryptionPublicKey = encryptionPublicKey.trim();

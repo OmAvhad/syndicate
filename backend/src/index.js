@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import followRoutes from './routes/follow.js';
 import tradeRoutes from './routes/trade.js';
+import poolRoutes from './routes/pool.js';
 import { initWebSocketServer } from './websocket.js';
 
 const app = express();
@@ -32,6 +33,9 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
+// Mount before the generic /api follow router, whose JWT middleware would
+// intercept the SDK's requests (authorized by their short-lived session).
+app.use('/api/pool', poolRoutes);
 app.use('/api', followRoutes);
 app.use('/api/trades', tradeRoutes);
 

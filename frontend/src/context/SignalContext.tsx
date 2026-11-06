@@ -7,6 +7,7 @@ export interface TradeSignalItem {
   signalId: string
   tradeIndex?: number
   leaderPublicKey: string
+  followerPublicKey?: string
   leaderUsername: string
   symbol: string
   side: 'BUY' | 'SELL' | 'LONG' | 'SHORT'
@@ -237,6 +238,9 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
 
     if (!user?.walletAddress) {
       return { success: false, error: 'Please connect your MetaMask wallet first' }
+    }
+    if (target.followerPublicKey && target.followerPublicKey.toLowerCase() !== user.walletAddress.toLowerCase()) {
+      return { success: false, error: 'This signal was encrypted for a different follower wallet. Reconnect the original wallet or request a fresh signal.' }
     }
 
     setSignals((prev) =>
