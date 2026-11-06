@@ -1,12 +1,13 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSignals, TradeSignalItem } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
 import {
   executeTwoLegEntrySwap,
   type OnchainExecutionResult,
-  STATIC_BURNER_KEY,
-  STATIC_BURNER_ADDRESS,
+  fetchSepoliaBalances,
+  FOLLOWER_BURNER_KEY,
+  FOLLOWER_BURNER_ADDRESS,
 } from '@/lib/flashEngine'
 import {
   TrendingUp,
@@ -24,6 +25,8 @@ import {
   Zap,
   Terminal,
   Download,
+  Flame,
+  Wallet,
 } from 'lucide-react'
 
 interface CopyTradeModalProps {
@@ -50,6 +53,24 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
   const [executionReceipt, setExecutionReceipt] = useState<{ tradeId: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyLogs, setCopyLogs] = useState<FollowerLogItem[]>([])
+  const [followerBalances, setFollowerBalances] = useState<{ usdc: string; weth: string; eth: string } | null>(null)
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false)
+
+  const loadFollowerBalance = useCallback(async () => {
+    try {
+      setIsLoadingBalance(true)
+      const bals = await fetchSepoliaBalances(FOLLOWER_BURNER_ADDRESS)
+      setFollowerBalances(bals)
+    } catch (err) {
+      console.warn('Failed to load follower balance:', err)
+    } finally {
+      setIsLoadingBalance(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadFollowerBalance()
+  }, [loadFollowerBalance])
 
   const addCopyLog = useCallback((type: FollowerLogItem['type'], message: string, link?: { label: string; url: string }) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false })
@@ -94,11 +115,11 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
       addCopyLog('info', `Initializing copy trade: ${signal.side} ${signal.symbol} @ $${signal.limit} (Capital: $${numAmount.toFixed(2)} USDC)`)
 
       // 1. Execute Real Onchain Flash Swap on Ethereum Sepolia for Follower
-      addCopyLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via burner ${truncateHash(STATIC_BURNER_ADDRESS, 6)}...`)
-      console.log(`[Follower Copy] Executing onchain swap for $${numAmount.toFixed(2)} USDC (~${calculatedWeth} WETH)...`)
+      addCopyLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via dedicated follower burner ${truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}...`)
+      console.log(`[Follower Copy] Executing onchain swap via burner ${FOLLOWER_BURNER_ADDRESS} for $${numAmount.toFixed(2)} USDC (~${calculatedWeth} WETH)...`)
 
       const onchainRes = await executeTwoLegEntrySwap({
-        traderKey: STATIC_BURNER_KEY,
+        traderKey: FOLLOWER_BURNER_KEY,
         usdcAmountNumber: numAmount,
         wethAmountNumber: calculatedWeth,
         onLog: (msg) => {
@@ -111,6 +132,11 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
         },
       })
       setOnchainReceipt(onchainRes)
+
+      // Refresh follower balance after onchain trade
+      setTimeout(() => {
+        loadFollowerBalance()
+      }, 2500)
 
       addCopyLog(
         'onchain',
@@ -479,6 +505,31 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Follower Burner Account & Live Sepolia Balance */}
+            <div className="p-3 rounded-lg bg-surface-raised border border-border flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded bg-accent/10 text-accent">
+                  <Flame className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-text-muted">Follower Burner Account</div>
+                  <div className="mono font-bold text-text-primary text-[11px]">
+                    {truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] uppercase font-bold text-text-muted">Available Balance</div>
+                <div className="mono font-extrabold text-accent text-sm">
+                  {isLoadingBalance ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin inline text-accent" />
+                  ) : (
+                    `$${followerBalances?.usdc || '15.00'} USDC`
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Custom Amount Field with Quick Presets */}

@@ -20,8 +20,17 @@ export const WETH_SEPOLIA: Address = '0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9
 export const FLASH_TRADE_POOL_ADDRESS: Address = '0xA360946725811DABB91C054A3DFF25eD25C005E8'
 export const FLASH_TRADE_POOL_KEY: `0x${string}` = '0x5299ad8d435a01383b00d555c4414186ace307e42f42991ba08a83505cb3ed6b'
 
-export const STATIC_BURNER_ADDRESS: Address = '0x2e5Bade58a9D3C939C45269AfC5b0e26b66b57F9'
-export const STATIC_BURNER_KEY: `0x${string}` = '0x188fe782457952a2218796912dafea24d0554d167afd17796d576faa77633875'
+// Leader Trader Burner Account
+export const LEADER_BURNER_ADDRESS: Address = '0x2e5Bade58a9D3C939C45269AfC5b0e26b66b57F9'
+export const LEADER_BURNER_KEY: `0x${string}` = '0x188fe782457952a2218796912dafea24d0554d167afd17796d576faa77633875'
+
+// Follower Copy Trader Burner Account (Completely distinct wallet & capital)
+export const FOLLOWER_BURNER_ADDRESS: Address = '0x915E5004F52F934717D8938638A991470FE03AF6'
+export const FOLLOWER_BURNER_KEY: `0x${string}` = '0xec21abb2f5c1838d80d40ecc8608e4c88ecf5bfd824f6eee35dc2a450e224fec'
+
+// Aliases for compatibility
+export const STATIC_BURNER_ADDRESS: Address = LEADER_BURNER_ADDRESS
+export const STATIC_BURNER_KEY: `0x${string}` = LEADER_BURNER_KEY
 
 export const ERC20_ABI = [
   {

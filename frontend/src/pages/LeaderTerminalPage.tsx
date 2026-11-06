@@ -8,8 +8,8 @@ import {
   executeTwoLegExitSwap,
   type OnchainExecutionResult,
   fetchSepoliaBalances,
-  STATIC_BURNER_ADDRESS,
-  STATIC_BURNER_KEY,
+  LEADER_BURNER_ADDRESS,
+  LEADER_BURNER_KEY,
   FLASH_TRADE_POOL_ADDRESS,
 } from '@/lib/flashEngine'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
@@ -55,7 +55,7 @@ export default function LeaderTerminalPage() {
   const [amount, setAmount] = useState('3.00')
   const [stopLoss, setStopLoss] = useState('2800')
   const [target, setTarget] = useState('3350')
-  const [burnerAddress, setBurnerAddress] = useState<string>(STATIC_BURNER_ADDRESS)
+  const [burnerAddress, setBurnerAddress] = useState<string>(LEADER_BURNER_ADDRESS)
 
   // Live Onchain Balances (Burner & Vault)
   const [burnerBalances, setBurnerBalances] = useState<{ eth: string; usdc: string; weth: string } | null>(null)
@@ -67,7 +67,7 @@ export default function LeaderTerminalPage() {
       setIsLoadingBalances(true)
       const targetBurner = (burnerAddress && burnerAddress.startsWith('0x') && burnerAddress.length === 42)
         ? (burnerAddress as `0x${string}`)
-        : STATIC_BURNER_ADDRESS
+        : LEADER_BURNER_ADDRESS
 
       const [bBal, vBal] = await Promise.all([
         fetchSepoliaBalances(targetBurner),
@@ -179,7 +179,7 @@ export default function LeaderTerminalPage() {
         amount: usdcCapital,
         stopLoss: Number(stopLoss),
         target: Number(target),
-        burnerAccountAddress: burnerAddress || STATIC_BURNER_ADDRESS,
+        burnerAccountAddress: burnerAddress || LEADER_BURNER_ADDRESS,
       }
 
       console.log('[Terminal] Step 1: Requesting Promise Commitment from /api/trades/promise...')
@@ -237,10 +237,10 @@ export default function LeaderTerminalPage() {
       // Step 2: Real Onchain Execution on Ethereum Sepolia
       setStep('executing_onchain')
       setStepMessage('Executing real onchain two-leg swap (USDC ↔ WETH) on Ethereum Sepolia...')
-      addTradeLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via burner ${truncateHash(STATIC_BURNER_ADDRESS, 6)}...`)
+      addTradeLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via burner ${truncateHash(LEADER_BURNER_ADDRESS, 6)}...`)
 
       const onchainRes = await executeTwoLegEntrySwap({
-        traderKey: STATIC_BURNER_KEY,
+        traderKey: LEADER_BURNER_KEY,
         usdcAmountNumber: usdcCapital,
         wethAmountNumber: wethPos,
         onLog: (msg) => {
@@ -373,7 +373,7 @@ export default function LeaderTerminalPage() {
       addTradeLog('onchain', `Returning 0.001 WETH position to FlashTradePool Vault...`)
 
       const exitReceipt = await executeTwoLegExitSwap({
-        traderKey: STATIC_BURNER_KEY,
+        traderKey: LEADER_BURNER_KEY,
         wethAmountNumber: 0.001,
         usdcReturnAmountNumber: profitUsdc,
         onLog: (msg) => {

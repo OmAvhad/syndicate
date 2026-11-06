@@ -1,0 +1,63 @@
+[
+    {
+        "timestamp": "2026-11-06T13:17:44.691Z",
+        "category": "PROMISE",
+        "title": "Trade #2 Sealed Promise Committed on Arkiv",
+        "details": {
+            "tradeIndex": 2,
+            "promiseId": "prm_2_1793971062468_8fd0af6e",
+            "symbol": "ETH/USDC",
+            "side": "BUY",
+            "limitPrice": "$3000",
+            "amountUSDC": "$3.00",
+            "stopLoss": "$2800",
+            "takeProfit": "$3350",
+            "burnerWallet": "0x2e5Bade58a9D3C939C45269AfC5b0e26b66b57F9",
+            "payloadHash": "1217c3b5cc41c19a7bda4f45e84c123a4dfbae42694aa9b7ff9cda50dc08b4fd",
+            "arkivEntityKey": "0xprm_1d727983bfcbac8d99d113b76b7841df",
+            "retention": "30 Days (Audit Epoch)"
+        },
+        "links": [
+            {
+                "label": "Arkiv Rabdi Explorer (Entity: 0xprm_1d727983bfcbac8d99d113b76b7841df)",
+                "url": "https://testnet.explorer.arkiv.network/entity/0xprm_1d727983bfcbac8d99d113b76b7841df"
+            }
+        ]
+    },
+    {
+        "timestamp": "2026-11-06T13:18:01.417Z",
+        "category": "ONCHAIN_TRADE",
+        "title": "Trade #2 Atomic Flash Swap Mined on Ethereum Sepolia",
+        "details": {
+            "tradeIndex": 2,
+            "burnerAddress": "0x2e5Bade58a9D3C939C45269AfC5b0e26b66b57F9",
+            "usdcSpent": "$3.00 USDC",
+            "wethPositionDelivered": "0.001000 WETH",
+            "blockNumber": 12076800,
+            "gasUsed": "96584",
+            "settlementVault": "0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)"
+        },
+        "links": [
+            {
+                "label": "Etherscan Leg 1 (USDC Transfer: 0x37b9...f73c)",
+                "url": "https://sepolia.etherscan.io/tx/0x37b95f0ed8a2bc9bb296f24733eddec89f8dac32b1da896c4da699874d6af73c"
+            },
+            {
+                "label": "Etherscan Leg 2 (WETH Delivery: 0x474e...d5f8)",
+                "url": "https://sepolia.etherscan.io/tx/0x474e52b75e5a1ba4d4c725787fdf27d0260317cae4cb9e5819b159be4bd2d5f8"
+            }
+        ]
+    },
+    {
+        "timestamp": "2026-11-06T13:18:06.207Z",
+        "category": "ARKIV_SIGNAL",
+        "title": "Trade #2 Encrypted Signals Dispatched via WebSockets & ArkDB",
+        "details": {
+            "tradeIndex": 2,
+            "followersNotified": 1,
+            "ttl": "600 Seconds (10 Minutes)",
+            "expiresAt": "2026-11-06T13:28:01.609Z",
+            "channel": "WebSockets (/ws) + Arkiv Rabdi Entity"
+        }
+    }
+]
