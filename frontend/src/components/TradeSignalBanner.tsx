@@ -41,7 +41,7 @@ export default function TradeSignalBanner() {
                   <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
                   <span className="text-[10px] uppercase font-bold tracking-wider text-accent flex items-center gap-1">
                     <Radio className="w-3 h-3 text-accent" />
-                    Incoming Trade Signal
+                    Trade #{sig.tradeIndex || 1} Signal
                   </span>
                 </div>
 

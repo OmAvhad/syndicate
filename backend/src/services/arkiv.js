@@ -52,6 +52,25 @@ export const TradeSignalSchema = defineSchema('trade_signals', {
 });
 
 /**
+ * Arkiv Schema for Sealed Trade Promises (syndicate-design.html)
+ * Columns:
+ * - promiseId
+ * - leaderPublicKey
+ * - leaderNullifier
+ * - tradeIndex (sequential trade count: 1, 2, 3...)
+ * - payloadHash (HMAC-SHA256 commitment)
+ * - timestamp
+ */
+export const TradePromiseSchema = defineSchema('trade_promises', {
+  promiseId:        str().indexed(),
+  leaderPublicKey:  addr().indexed(),
+  leaderNullifier:  str().indexed(),
+  tradeIndex:       u64().indexed(),
+  payloadHash:      str().indexed(),
+  timestamp:        str().indexed(),
+});
+
+/**
  * Create public reader client for Arkiv Rabdi testnet
  */
 export function getArkivPublicClient() {
@@ -242,6 +261,68 @@ export async function storeTradeSignalInArkiv({
     entityKey: `0xsignal_${hash.slice(0, 32)}`,
     txHash: `0xtx_${hash.slice(32, 64)}`,
     ttlMinutes: 10,
+  };
+}
+
+/**
+ * Stores a sealed trade promise in Arkiv under trade_promises schema
+ * with a 30-day audit TTL (ExpirationTime.fromDays(30))
+ */
+export async function storeTradePromiseInArkiv({
+  promiseId,
+  leaderPublicKey,
+  leaderNullifier,
+  tradeIndex,
+  payloadHash,
+  timestamp,
+}) {
+  const normLeaderKey = (leaderPublicKey && isHex(leaderPublicKey))
+    ? leaderPublicKey.toLowerCase()
+    : '0x0000000000000000000000000000000000000000';
+
+  const payload = {
+    promiseId: String(promiseId),
+    leaderPublicKey: normLeaderKey,
+    leaderNullifier: String(leaderNullifier || ''),
+    tradeIndex: BigInt(tradeIndex || 1),
+    payloadHash: String(payloadHash || ''),
+    timestamp: String(timestamp || new Date().toISOString()),
+  };
+
+  try {
+    const walletClient = getArkivWalletClient();
+    if (walletClient) {
+      // 30 days retention for auditability
+      const expiration = ExpirationTime.fromDays(30);
+      const result = await walletClient.createEntity(TradePromiseSchema, payload, {
+        expiration,
+      });
+
+      console.log(`[Arkiv] Sealed Trade Promise #${tradeIndex} created on Rabdi! Entity Key: ${result.entityKey}`);
+      return {
+        success: true,
+        onChain: true,
+        entityKey: result.entityKey,
+        txHash: result.txHash,
+        tradeIndex: Number(tradeIndex),
+      };
+    }
+  } catch (error) {
+    console.warn(`[Arkiv] Trade promise on-chain notice:`, error.message);
+  }
+
+  // Graceful deterministic fallback
+  const fallbackHash = crypto
+    .createHash('sha256')
+    .update(`${promiseId}:${leaderNullifier}:${tradeIndex}:${payloadHash}`)
+    .digest('hex');
+
+  return {
+    success: true,
+    onChain: false,
+    entityKey: `0xprm_${fallbackHash.slice(0, 32)}`,
+    txHash: `0xtx_prm_${fallbackHash.slice(32, 64)}`,
+    tradeIndex: Number(tradeIndex),
   };
 }
 

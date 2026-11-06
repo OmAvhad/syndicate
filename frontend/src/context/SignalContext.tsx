@@ -4,6 +4,7 @@ import api from '@/lib/api'
 
 export interface TradeSignalItem {
   signalId: string
+  tradeIndex?: number
   leaderPublicKey: string
   leaderUsername: string
   symbol: string

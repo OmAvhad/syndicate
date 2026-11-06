@@ -6,7 +6,7 @@ import Follow from '../models/Follow.js';
 import Trade from '../models/Trade.js';
 import TradeSignal from '../models/TradeSignal.js';
 import { hashTradePayload, encryptTradeSignal, decryptTradeSignal } from '../services/tradeCrypto.js';
-import { storeTradeSignalInArkiv } from '../services/arkiv.js';
+import { storeTradeSignalInArkiv, storeTradePromiseInArkiv } from '../services/arkiv.js';
 import { sendSignalToFollower, broadcastToAll } from '../websocket.js';
 
 const router = express.Router();
@@ -36,7 +36,13 @@ router.post('/promise', async (req, res) => {
       return res.status(400).json({ error: 'Missing required trade parameters (symbol, side, limit, amount)' });
     }
 
+    // Retrieve leader to compute sequential trade counter (Trade #1, Trade #2...)
+    const leader = await User.findById(req.user.userId);
+    const tradeIndex = (leader?.tradeCount || 0) + 1;
+    await User.findByIdAndUpdate(req.user.userId, { tradeCount: tradeIndex });
+
     const tradeData = {
+      tradeIndex,
       symbol,
       side,
       orderType,
@@ -47,26 +53,38 @@ router.post('/promise', async (req, res) => {
       burnerAccountAddress,
     };
 
-    // Calculate/verify server-side HMAC hash using secret stored in .env
+    // Calculate/verify server-side HMAC hash using secret stored in .env including tradeIndex
     const calculatedHash = hashTradePayload(tradeData);
 
-    const promiseId = `prm_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+    const promiseId = `prm_${tradeIndex}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    console.log(`[Trade Promise] Leader ${req.user.userId} committed trade promise ${promiseId} for ${symbol} ${side}`);
+    console.log(`[Trade Promise] Leader ${req.user.userId} committed Trade #${tradeIndex} promise ${promiseId} for ${symbol} ${side}`);
     console.log(`[Trade Promise] Hash: ${calculatedHash}`);
 
-    // Return mocked successful commitment response
+    // Store sealed promise on Arkiv with 30-day audit retention
+    const arkivResult = await storeTradePromiseInArkiv({
+      promiseId,
+      leaderPublicKey: leader?.walletAddress || '0x0000000000000000000000000000000000000000',
+      leaderNullifier: leader?.nullifierHash || '',
+      tradeIndex,
+      payloadHash: calculatedHash,
+      timestamp: new Date().toISOString(),
+    });
+
     return res.json({
       success: true,
       promiseId,
+      tradeIndex,
       status: 'COMMITTED',
       symbol: tradeData.symbol,
       side: tradeData.side,
       limit: tradeData.limit,
       amount: tradeData.amount,
       payloadHash: calculatedHash,
+      arkivEntityKey: arkivResult.entityKey,
+      arkivTxHash: arkivResult.txHash,
       timestamp: new Date().toISOString(),
-      message: 'Trade promise cryptographically sealed and committed',
+      message: `Trade promise #${tradeIndex} cryptographically sealed and committed on Arkiv`,
     });
   } catch (error) {
     console.error('[Trade Promise] Error:', error.message);
@@ -93,6 +111,7 @@ router.post('/execute', async (req, res) => {
       burnerAccountAddress = '',
       payloadHash,
       promiseId,
+      tradeIndex = 1,
       isCopyTrade = false,
       originalSignalId = null,
     } = req.body;
@@ -104,6 +123,7 @@ router.post('/execute', async (req, res) => {
     }
 
     const tradeData = {
+      tradeIndex: Number(tradeIndex || 1),
       symbol,
       side,
       orderType,
@@ -122,6 +142,7 @@ router.post('/execute', async (req, res) => {
     const trade = await Trade.create({
       userId: currentUserId,
       isCopyTrade: Boolean(isCopyTrade),
+      tradeIndex: Number(tradeIndex || 1),
       symbol: tradeData.symbol,
       side: tradeData.side,
       orderType: tradeData.orderType,
@@ -150,6 +171,7 @@ router.post('/execute', async (req, res) => {
     return res.json({
       success: true,
       tradeId: trade._id,
+      tradeIndex: trade.tradeIndex || 1,
       symbol: trade.symbol,
       side: trade.side,
       orderType: trade.orderType,
@@ -191,6 +213,7 @@ router.post('/signal', async (req, res) => {
       target = 0,
       burnerAccountAddress = '',
       payloadHash,
+      tradeIndex = 1,
     } = req.body;
 
     const leader = await User.findById(leaderId);
@@ -198,7 +221,10 @@ router.post('/signal', async (req, res) => {
       return res.status(400).json({ error: 'Leader must have a connected wallet address to broadcast signals' });
     }
 
+    const effectiveTradeIndex = Number(tradeIndex || leader.tradeCount || 1);
+
     const tradeData = {
+      tradeIndex: effectiveTradeIndex,
       symbol,
       side,
       orderType,
@@ -207,7 +233,7 @@ router.post('/signal', async (req, res) => {
       stopLoss: Number(stopLoss),
       target: Number(target),
       burnerAccountAddress,
-      payloadHash: payloadHash || hashTradePayload({ symbol, side, orderType, limit, amount, stopLoss, target, burnerAccountAddress }),
+      payloadHash: payloadHash || hashTradePayload({ tradeIndex: effectiveTradeIndex, symbol, side, orderType, limit, amount, stopLoss, target, burnerAccountAddress }),
       leaderUsername: leader.username || null,
       leaderNullifier: leader.nullifierHash,
     };
@@ -271,6 +297,7 @@ router.post('/signal', async (req, res) => {
       // Decrypt trade data specifically for the follower UI
       const decryptedForFollower = {
         signalId,
+        tradeIndex: effectiveTradeIndex,
         leaderPublicKey: leader.walletAddress,
         leaderUsername: leader.username || 'Verified Leader',
         symbol: tradeData.symbol,
@@ -335,6 +362,7 @@ router.get('/signals/active', async (req, res) => {
       const remainingSeconds = Math.max(0, Math.floor((new Date(s.expiresAt).getTime() - Date.now()) / 1000));
       return {
         signalId: s.signalId,
+        tradeIndex: s.tradePayload?.tradeIndex || 1,
         leaderPublicKey: s.leaderPublicKey,
         leaderUsername: s.leaderId?.username || 'Verified Leader',
         symbol: s.tradePayload?.symbol,

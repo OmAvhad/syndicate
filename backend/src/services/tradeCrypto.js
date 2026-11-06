@@ -9,6 +9,7 @@ const getHashSecret = () => process.env.TRADE_HASH_SECRET || 'syndicate_trade_ha
 export function hashTradePayload(tradeData) {
   const secret = getHashSecret();
   const normalized = {
+    tradeIndex: tradeData.tradeIndex ? Number(tradeData.tradeIndex) : 1,
     symbol: tradeData.symbol?.trim().toUpperCase(),
     side: tradeData.side?.trim().toUpperCase(),
     orderType: tradeData.orderType?.trim().toUpperCase() || 'LIMIT',

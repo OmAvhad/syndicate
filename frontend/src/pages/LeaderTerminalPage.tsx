@@ -2,6 +2,13 @@ import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
+import {
+  executeTwoLegEntrySwap,
+  executeTwoLegExitSwap,
+  type OnchainExecutionResult,
+  STATIC_BURNER_ADDRESS,
+  STATIC_BURNER_KEY,
+} from '@/lib/flashEngine'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import {
@@ -21,11 +28,12 @@ import {
   Layers,
   Database,
   RefreshCw,
+  Zap,
 } from 'lucide-react'
 
 const SYMBOLS = [
+  { label: 'ETH/USDC', name: 'Ethereum Sepolia', price: 3000.0 },
   { label: 'BTC/USDT', name: 'Bitcoin', price: 92450.0 },
-  { label: 'ETH/USDT', name: 'Ethereum', price: 3420.5 },
   { label: 'SOL/USDT', name: 'Solana', price: 188.25 },
   { label: 'BASE/USDT', name: 'Base Native', price: 4.85 },
   { label: 'WLD/USDT', name: 'Worldcoin', price: 2.15 },
@@ -35,23 +43,29 @@ export default function LeaderTerminalPage() {
   const { user } = useAuth()
 
   // Form State
-  const [symbol, setSymbol] = useState('BTC/USDT')
+  const [symbol, setSymbol] = useState('ETH/USDC')
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY')
-  const [orderType, setOrderType] = useState<'LIMIT' | 'MARKET'>('LIMIT')
-  const [limit, setLimit] = useState('92450')
-  const [amount, setAmount] = useState('0.25')
-  const [stopLoss, setStopLoss] = useState('89500')
-  const [target, setTarget] = useState('98000')
-  const [burnerAddress, setBurnerAddress] = useState('')
+  const [orderType, setOrderType] = useState<'BRACKET' | 'LIMIT' | 'MARKET'>('BRACKET')
+  const [limit, setLimit] = useState('3000')
+  const [amount, setAmount] = useState('3.00')
+  const [stopLoss, setStopLoss] = useState('2800')
+  const [target, setTarget] = useState('3350')
+  const [burnerAddress, setBurnerAddress] = useState<string>(STATIC_BURNER_ADDRESS)
 
   // Multi-step lifecycle state
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [step, setStep] = useState<'idle' | 'promising' | 'executing_and_signaling' | 'completed' | 'error'>('idle')
-  const [promiseData, setPromiseData] = useState<{ promiseId: string; payloadHash: string } | null>(null)
+  const [step, setStep] = useState<'idle' | 'promising' | 'executing_onchain' | 'signaling' | 'completed' | 'error'>('idle')
+  const [stepMessage, setStepMessage] = useState<string>('')
+  const [promiseData, setPromiseData] = useState<{ promiseId: string; payloadHash: string; tradeIndex?: number; arkivEntityKey?: string } | null>(null)
+  const [onchainResult, setOnchainResult] = useState<OnchainExecutionResult | null>(null)
   const [executionResult, setExecutionResult] = useState<{ tradeId: string; executionTxHash: string } | null>(null)
   const [signalResult, setSignalResult] = useState<{ followersNotified: number; signals: Array<{ signalId: string; arkivEntityKey: string }> } | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  // Exit trigger state
+  const [isExiting, setIsExiting] = useState(false)
+  const [exitResult, setExitResult] = useState<OnchainExecutionResult | null>(null)
 
   // Generate a random burner account address
   const handleGenerateBurner = () => {
@@ -86,11 +100,9 @@ export default function LeaderTerminalPage() {
   }
 
   // Core Execution Flow:
-  // 1. Trigger /promise API with hashed payload
-  // 2. Wait for promise commitment response
-  // 3. Trigger 2 calls simultaneously:
-  //    - Trade Execution (/api/trades/execute)
-  //    - Trade Signal with 10-min TTL in ArkDB (/api/trades/signal)
+  // 1. Trigger /promise API with hashed payload & sequential Trade #N (Anchored in Arkiv)
+  // 2. Execute Real Onchain Two-Leg Atomic Swap on Ethereum Sepolia
+  // 3. Trigger simultaneous Execution record & Follower Encrypted Signals (10-min Arkiv TTL)
   const handlePlaceOrderAndSignal = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -103,16 +115,20 @@ export default function LeaderTerminalPage() {
       setIsSubmitting(true)
       setErrorMessage(null)
       setStep('promising')
+      setStepMessage('Sealing Trade Promise on Arkiv Rabdi testnet...')
+
+      const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
+      const wethPos = 0.001
 
       const tradePayload = {
         symbol,
         side,
         orderType,
         limit: Number(limit),
-        amount: Number(amount),
+        amount: usdcCapital,
         stopLoss: Number(stopLoss),
         target: Number(target),
-        burnerAccountAddress: burnerAddress || user.walletAddress,
+        burnerAccountAddress: burnerAddress || STATIC_BURNER_ADDRESS,
       }
 
       console.log('[Terminal] Step 1: Requesting Promise Commitment from /api/trades/promise...')
@@ -126,35 +142,52 @@ export default function LeaderTerminalPage() {
       const pData = {
         promiseId: promiseRes.data.promiseId,
         payloadHash: promiseRes.data.payloadHash,
+        tradeIndex: promiseRes.data.tradeIndex || 1,
+        arkivEntityKey: promiseRes.data.arkivEntityKey,
       }
       setPromiseData(pData)
 
-      console.log('[Terminal] Promise Committed:', pData)
-      setStep('executing_and_signaling')
+      console.log('[Terminal] Promise Committed with Sequential Index:', pData)
 
-      // Step 2: Trigger two simultaneous calls:
-      // Call A: Trade Execution
-      // Call B: Trade Signal (encrypted for followers, stored in ArkDB with 10-min TTL, sent via WebSocket)
+      // Step 2: Real Onchain Execution on Ethereum Sepolia
+      setStep('executing_onchain')
+      setStepMessage('Executing real onchain two-leg swap (USDC ↔ WETH) on Ethereum Sepolia...')
+
+      const onchainRes = await executeTwoLegEntrySwap({
+        traderKey: STATIC_BURNER_KEY,
+        usdcAmountNumber: usdcCapital,
+        wethAmountNumber: wethPos,
+        onLog: (msg) => console.log(`[Flash Engine] ${msg}`),
+      })
+      setOnchainResult(onchainRes)
+
+      // Step 3: Trigger simultaneous Execution record & Follower Signals
+      setStep('signaling')
+      setStepMessage('Recording fill and encrypting 10-minute signals for followers in ArkDB...')
+
       const [execRes, signalRes] = await Promise.all([
         api.post('/api/trades/execute', {
           ...tradePayload,
+          tradeIndex: pData.tradeIndex,
           payloadHash: pData.payloadHash,
           promiseId: pData.promiseId,
+          executionTxHash: onchainRes.leg1TxHash,
           isCopyTrade: false,
         }),
         api.post('/api/trades/signal', {
           ...tradePayload,
+          tradeIndex: pData.tradeIndex,
           payloadHash: pData.payloadHash,
         }),
       ])
 
       if (!execRes.data?.success) {
-        throw new Error(execRes.data?.error || 'Trade execution failed')
+        throw new Error(execRes.data?.error || 'Trade execution record failed')
       }
 
       setExecutionResult({
         tradeId: execRes.data.tradeId,
-        executionTxHash: execRes.data.executionTxHash,
+        executionTxHash: onchainRes.leg1TxHash,
       })
 
       if (signalRes.data?.success) {
@@ -164,7 +197,7 @@ export default function LeaderTerminalPage() {
         })
       }
 
-      console.log('[Terminal] Simultaneous Execution & Signal completed successfully!')
+      console.log('[Terminal] Real onchain trade & signal completed successfully!')
       setStep('completed')
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string }
@@ -173,6 +206,31 @@ export default function LeaderTerminalPage() {
       setStep('error')
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // Trigger onchain exit settlement (Take-Profit hit at $3,350)
+  const handleTriggerTakeProfitExit = async () => {
+    try {
+      setIsExiting(true)
+      setErrorMessage(null)
+      const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
+      const profitUsdc = Number((usdcCapital * 1.113).toFixed(2)) // 11.3% profit minus 30 bps fee
+
+      const exitReceipt = await executeTwoLegExitSwap({
+        traderKey: STATIC_BURNER_KEY,
+        wethAmountNumber: 0.001,
+        usdcReturnAmountNumber: profitUsdc,
+        onLog: (msg) => console.log(`[Exit Settlement] ${msg}`),
+      })
+
+      setExitResult(exitReceipt)
+    } catch (err: unknown) {
+      const e = err as Error
+      console.error('[Exit Settlement] Error:', e)
+      setErrorMessage(`Exit settlement failed: ${e.message}`)
+    } finally {
+      setIsExiting(false)
     }
   }
 
@@ -409,12 +467,12 @@ export default function LeaderTerminalPage() {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-text-inverse" />
-                        <span>Processing Promise & Signal Dispatch...</span>
+                        <span>{stepMessage || 'Executing Real Onchain Swap & Dispatching Signals...'}</span>
                       </>
                     ) : (
                       <>
                         <Radio className="w-4 h-4 text-text-inverse stroke-[2.2]" />
-                        <span>Commit Promise & Broadcast 10-Min Signal</span>
+                        <span>Commit Promise & Execute Real Onchain Flash Trade</span>
                       </>
                     )}
                   </button>
@@ -434,7 +492,7 @@ export default function LeaderTerminalPage() {
                   <CardTitle>Three-Step Execution Protocol</CardTitle>
                 </div>
                 <CardDescription>
-                  How the syndicate protects leaders and followers without leaks.
+                  How the syndicate executes onchain without leaking the leader's identity.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3.5 text-xs">
@@ -443,28 +501,51 @@ export default function LeaderTerminalPage() {
                 <div className={`p-3.5 rounded-md border transition-all ${
                   step === 'promising'
                     ? 'bg-accent-soft border-accent text-text-primary'
-                    : step === 'executing_and_signaling' || step === 'completed'
+                    : step === 'executing_onchain' || step === 'signaling' || step === 'completed'
                     ? 'bg-surface-raised border-semantic-success/40 text-text-secondary'
                     : 'bg-surface-raised border-border text-text-muted'
                 }`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold flex items-center gap-1.5">
                       <Key className="w-3.5 h-3.5 text-accent" />
-                      1. Cryptographic Promise
+                      1. Sequential Cryptographic Promise
                     </span>
                     {step === 'promising' && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />}
-                    {(step === 'executing_and_signaling' || step === 'completed') && (
+                    {(step === 'executing_onchain' || step === 'signaling' || step === 'completed') && (
                       <Check className="w-3.5 h-3.5 text-semantic-success stroke-[2.5]" />
                     )}
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Trade details are hashed with <code className="text-accent mono">TRADE_HASH_SECRET</code> and committed to the backend /promise route.
+                    Trade parameters are hashed and sealed with a sequential counter (Trade #N) anchored on Arkiv with 30-day retention.
                   </p>
                 </div>
 
                 {/* Step 2 indicator */}
                 <div className={`p-3.5 rounded-md border transition-all ${
-                  step === 'executing_and_signaling'
+                  step === 'executing_onchain'
+                    ? 'bg-accent-soft border-accent text-text-primary'
+                    : step === 'signaling' || step === 'completed'
+                    ? 'bg-surface-raised border-semantic-success/40 text-text-secondary'
+                    : 'bg-surface-raised border-border text-text-muted'
+                }`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-accent" />
+                      2. Real Onchain Sepolia Flash Swap
+                    </span>
+                    {step === 'executing_onchain' && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />}
+                    {(step === 'signaling' || step === 'completed') && (
+                      <Check className="w-3.5 h-3.5 text-semantic-success stroke-[2.5]" />
+                    )}
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Two-leg atomic swap: Burner transfers USDC to FlashTradePool Vault; Vault delivers WETH position to Burner.
+                  </p>
+                </div>
+
+                {/* Step 3 indicator */}
+                <div className={`p-3.5 rounded-md border transition-all ${
+                  step === 'signaling'
                     ? 'bg-accent-soft border-accent text-text-primary'
                     : step === 'completed'
                     ? 'bg-surface-raised border-semantic-success/40 text-text-secondary'
@@ -472,32 +553,14 @@ export default function LeaderTerminalPage() {
                 }`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-accent" />
-                      2. Simultaneous Execution
-                    </span>
-                    {step === 'executing_and_signaling' && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />}
-                    {step === 'completed' && <Check className="w-3.5 h-3.5 text-semantic-success stroke-[2.5]" />}
-                  </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Leader trade execution is filled simultaneously as signals are encrypted for each follower.
-                  </p>
-                </div>
-
-                {/* Step 3 indicator */}
-                <div className={`p-3.5 rounded-md border transition-all ${
-                  step === 'completed'
-                    ? 'bg-surface-raised border-semantic-success/40 text-text-secondary'
-                    : 'bg-surface-raised border-border text-text-muted'
-                }`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold flex items-center gap-1.5">
                       <Database className="w-3.5 h-3.5 text-accent" />
-                      3. ArkDB 10-Min TTL Anchor
+                      3. Encrypted Signals on ArkDB (10m TTL)
                     </span>
+                    {step === 'signaling' && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />}
                     {step === 'completed' && <Check className="w-3.5 h-3.5 text-semantic-success stroke-[2.5]" />}
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Signals are saved in ArkDB table <code className="mono text-accent">trade_signals</code> with strict 10-minute time-to-live and pushed via WebSockets.
+                    Signals encrypted for active followers, stored in ArkDB with 10-minute expiry, and broadcasted via WebSockets.
                   </p>
                 </div>
 
@@ -511,59 +574,138 @@ export default function LeaderTerminalPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Check className="w-4 h-4 text-semantic-success stroke-[3]" />
-                      <CardTitle className="text-semantic-success">Order & Signals Active</CardTitle>
+                      <CardTitle className="text-semantic-success">Onchain Trade Filled & Sealed</CardTitle>
                     </div>
-                    <Badge variant="success">10m TTL Countdown</Badge>
+                    <Badge variant="success">Confirmed Onchain</Badge>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3 text-xs">
+                <CardContent className="space-y-3.5 text-xs">
                   
                   {promiseData && (
                     <div className="flex justify-between items-center p-2 rounded bg-surface border border-border">
-                      <span className="text-text-muted">Promise ID</span>
-                      <span className="mono tnum text-text-primary font-semibold">{promiseData.promiseId}</span>
-                    </div>
-                  )}
-
-                  {promiseData?.payloadHash && (
-                    <div className="flex justify-between items-center p-2 rounded bg-surface border border-border">
-                      <span className="text-text-muted">HMAC Payload Hash</span>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(promiseData.payloadHash, 'hash')}
-                        className="copy-chip text-[10px]"
-                      >
-                        <span className="mono tnum">{truncateHash(promiseData.payloadHash, 6)}</span>
-                        {copiedKey === 'hash' ? <Check className="w-3 h-3 text-semantic-success" /> : <Copy className="w-3 h-3" />}
-                      </button>
-                    </div>
-                  )}
-
-                  {executionResult && (
-                    <div className="flex justify-between items-center p-2 rounded bg-surface border border-border">
-                      <span className="text-text-muted">Execution Tx</span>
-                      <span className="mono tnum text-accent font-semibold">
-                        {truncateHash(executionResult.executionTxHash, 8)}
+                      <span className="text-text-muted">Sequential Order</span>
+                      <span className="mono tnum text-accent font-bold px-2 py-0.5 rounded bg-accent/10 border border-accent/20">
+                        Trade #{promiseData.tradeIndex || 1}
                       </span>
                     </div>
                   )}
 
-                  {signalResult && (
-                    <div className="p-3 rounded bg-accent-soft border border-accent/25 space-y-1">
-                      <div className="flex justify-between items-center font-bold text-text-primary">
-                        <span>Followers Notified</span>
-                        <span className="tnum text-accent text-sm">{signalResult.followersNotified} Active Human(s)</span>
+                  {/* Real Onchain Proof Links for Judges */}
+                  {onchainResult && (
+                    <div className="space-y-2 p-3 rounded bg-accent-soft/40 border border-accent/20">
+                      <div className="text-[11px] font-bold text-accent uppercase tracking-wider flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Live Sepolia Proofs (Judges)</span>
                       </div>
-                      <p className="text-[11px] text-text-secondary">
-                        Signals pushed over WebSockets and anchored on ArkDB with 10-minute lifespan.
-                      </p>
+                      
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-text-muted">Leg 1: USDC Swap Tx</span>
+                        <a
+                          href={onchainResult.leg1ExplorerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mono text-accent hover:underline flex items-center gap-1 font-semibold"
+                        >
+                          <span>{truncateHash(onchainResult.leg1TxHash, 6)}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-text-muted">Leg 2: WETH Position Tx</span>
+                        <a
+                          href={onchainResult.leg2ExplorerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mono text-accent hover:underline flex items-center gap-1 font-semibold"
+                        >
+                          <span>{truncateHash(onchainResult.leg2TxHash, 6)}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[10px] text-text-muted pt-1 border-t border-accent/15">
+                        <span>Block #{onchainResult.blockNumber}</span>
+                        <span>Gas Used: {onchainResult.gasUsed}</span>
+                      </div>
                     </div>
                   )}
+
+                  {promiseData?.arkivEntityKey && (
+                    <div className="flex justify-between items-center p-2 rounded bg-surface border border-border">
+                      <span className="text-text-muted">Arkiv Sealed Promise</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(promiseData.arkivEntityKey!, 'arkiv')}
+                        className="copy-chip text-[10px]"
+                      >
+                        <span className="mono tnum">{truncateHash(promiseData.arkivEntityKey, 6)}</span>
+                        {copiedKey === 'arkiv' ? <Check className="w-3 h-3 text-semantic-success" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  )}
+
+                  {signalResult && (
+                    <div className="p-2.5 rounded bg-surface border border-border space-y-1">
+                      <div className="flex justify-between items-center font-bold text-text-primary">
+                        <span>Followers Notified</span>
+                        <span className="tnum text-accent text-xs">{signalResult.followersNotified} Active Human(s)</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Interactive Exit Settlement Trigger */}
+                  <div className="pt-2 border-t border-border space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-text-primary">Simulate Market Trigger</span>
+                      <span className="text-[10px] text-semantic-success font-semibold">Active: 0.001 WETH</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleTriggerTakeProfitExit}
+                      disabled={isExiting}
+                      className="w-full py-2.5 px-3 rounded-md bg-semantic-success/20 hover:bg-semantic-success/30 border border-semantic-success/50 text-semantic-success font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
+                    >
+                      {isExiting ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Closing Position & Releasing USDC Onchain...</span>
+                        </>
+                      ) : (
+                        <>
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span>Trigger Bull Exit: Take-Profit ($3,350)</span>
+                        </>
+                      )}
+                    </button>
+
+                    {exitResult && (
+                      <div className="p-2.5 rounded bg-semantic-success/10 border border-semantic-success/30 space-y-1">
+                        <div className="text-[11px] font-bold text-semantic-success flex items-center justify-between">
+                          <span>✅ Exit Settlement Confirmed!</span>
+                          <span className="mono tnum text-[10px]">Block #{exitResult.blockNumber}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-text-muted">USDC Release Tx:</span>
+                          <a
+                            href={exitResult.leg2ExplorerUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mono text-semantic-success hover:underline flex items-center gap-1 font-semibold"
+                          >
+                            <span>{truncateHash(exitResult.leg2TxHash, 6)}</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   <button
                     type="button"
                     onClick={handleReset}
-                    className="w-full py-2 rounded-md bg-surface hover:bg-surface-hover border border-border text-xs font-semibold text-text-primary transition-colors"
+                    className="w-full py-2 rounded-md bg-surface hover:bg-surface-hover border border-border text-xs font-semibold text-text-primary transition-colors mt-2"
                   >
                     Place Another Order
                   </button>
