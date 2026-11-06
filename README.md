@@ -8,10 +8,12 @@
 ## ⚡ Quick Demo: Flash Trade Terminal & Live Social Copy Engine
 
 - **Stand-alone Flash Terminal (No Login Required):** **[`http://localhost:5173/flash-trade`](http://localhost:5173/flash-trade)**
+- **Ranked Trader Leaderboard & Equity Curves:** **[`http://localhost:5173/leaderboard`](http://localhost:5173/leaderboard)**
+- **Social Trade Commentary Feed:** **[`http://localhost:5173/feed`](http://localhost:5173/feed)**
 - **Leader Trading Desk (Authenticated):** **[`http://localhost:5173/trade`](http://localhost:5173/trade)**
 - **Follower Dashboard & Shielded Funds:** **[`http://localhost:5173/dashboard`](http://localhost:5173/dashboard)**
 - **Trade History, Receipts & Promise Claims:** **[`http://localhost:5173/history`](http://localhost:5173/history)**
-- **Leader Discovery & Subscriptions:** **[`http://localhost:5173/explore`](http://localhost:5173/explore)**
+- **Leader Discovery & Risk Profiles:** **[`http://localhost:5173/explore`](http://localhost:5173/explore)**
 
 For ETHGlobal Mumbai hackathon evaluation, SyndicateCopy features live onchain execution on **Ethereum Sepolia** and **Arkiv Rabdi Testnet** with zero-knowledge shielded privacy:
 - **Shielded Funds Management:** Deposit ETH, USDC, or WETH from MetaMask into a persistent Kohaku/Railgun shielded wallet (derivation in localStorage, note database in IndexedDB) with full backup and restore.
@@ -181,16 +183,16 @@ syndicate/
 │
 ├── frontend/          # 💻 Leader / Trader Web Desk (React 19 + Vite + Tailwind)
 │   ├── src/
-│   │   ├── pages/     # Landing, Dashboard, Explore Leaders, FlashTradePage, Profile
-│   │   ├── components/# Navbar, WalletConnectButton, WorldIDButton
-│   │   └── lib/       # Arkiv network & Viem Base / Sepolia helpers
+│   │   ├── pages/     # Dashboard, Leaderboard, Feed, Explore, Terminal, FlashTrade, Profile
+│   │   ├── components/# Navbar, WalletConnectButton, WorldIDButton, TradeSignalBanner
+│   │   └── lib/       # Arkiv network, Viem Base / Sepolia & Definitive client
 │   └── index.html
 │
 └── backend/           # ⚙️ Relayer & Core API (Node.js ESM + Express)
     ├── src/
-    │   ├── routes/    # /api/auth, /api/user, /api/explore, /api/follow, /api/trade
-    │   ├── services/  # arkiv.js, tradeCrypto.js
-    │   └── models/    # User.js, Follow.js, Trade.js, TradeSignal.js
+    │   ├── routes/    # /api/auth, /api/user, /api/explore, /api/follow, /api/trade, /api/posts
+    │   ├── services/  # arkiv.js, statsCalculator.js, tradeCrypto.js
+    │   └── models/    # User.js, Follow.js, SocialFollow.js, Trade.js, TradePost.js, LeaderStatsSnapshot.js
     └── render.yaml    # Production deployment blueprint for Render
 ```
 
