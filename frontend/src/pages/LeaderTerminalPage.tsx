@@ -346,6 +346,7 @@ export default function LeaderTerminalPage() {
       console.log('[Terminal] Real onchain trade & signal completed successfully!')
       setStep('completed')
       await loadBalances()
+      setTimeout(() => { loadBalances() }, 2500)
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string }
       console.error('[Terminal] Error in order lifecycle:', e)
@@ -387,6 +388,7 @@ export default function LeaderTerminalPage() {
 
       setExitResult(exitReceipt)
       await loadBalances()
+      setTimeout(() => { loadBalances() }, 2500)
 
       addTradeLog(
         'success',
