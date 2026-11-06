@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
@@ -7,8 +7,10 @@ import {
   executeTwoLegEntrySwap,
   executeTwoLegExitSwap,
   type OnchainExecutionResult,
+  fetchSepoliaBalances,
   STATIC_BURNER_ADDRESS,
   STATIC_BURNER_KEY,
+  FLASH_TRADE_POOL_ADDRESS,
 } from '@/lib/flashEngine'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -53,6 +55,35 @@ export default function LeaderTerminalPage() {
   const [stopLoss, setStopLoss] = useState('2800')
   const [target, setTarget] = useState('3350')
   const [burnerAddress, setBurnerAddress] = useState<string>(STATIC_BURNER_ADDRESS)
+
+  // Live Onchain Balances (Burner & Vault)
+  const [burnerBalances, setBurnerBalances] = useState<{ eth: string; usdc: string; weth: string } | null>(null)
+  const [vaultBalances, setVaultBalances] = useState<{ eth: string; usdc: string; weth: string } | null>(null)
+  const [isLoadingBalances, setIsLoadingBalances] = useState(false)
+
+  const loadBalances = useCallback(async () => {
+    try {
+      setIsLoadingBalances(true)
+      const targetBurner = (burnerAddress && burnerAddress.startsWith('0x') && burnerAddress.length === 42)
+        ? (burnerAddress as `0x${string}`)
+        : STATIC_BURNER_ADDRESS
+
+      const [bBal, vBal] = await Promise.all([
+        fetchSepoliaBalances(targetBurner),
+        fetchSepoliaBalances(FLASH_TRADE_POOL_ADDRESS),
+      ])
+      setBurnerBalances(bBal)
+      setVaultBalances(vBal)
+    } catch (err) {
+      console.warn('Failed to fetch onchain balances:', err)
+    } finally {
+      setIsLoadingBalances(false)
+    }
+  }, [burnerAddress])
+
+  useEffect(() => {
+    loadBalances()
+  }, [loadBalances])
 
   // Multi-step lifecycle state
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -256,6 +287,7 @@ export default function LeaderTerminalPage() {
 
       console.log('[Terminal] Real onchain trade & signal completed successfully!')
       setStep('completed')
+      await loadBalances()
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string }
       console.error('[Terminal] Error in order lifecycle:', e)
@@ -282,6 +314,7 @@ export default function LeaderTerminalPage() {
       })
 
       setExitResult(exitReceipt)
+      await loadBalances()
 
       // Log Exit Settlement Event for Judges
       logJudgeEvent({
@@ -371,7 +404,57 @@ export default function LeaderTerminalPage() {
                 </CardDescription>
               </CardHeader>
 
-              <CardContent>
+              <CardContent className="space-y-5">
+
+                {/* Live Onchain Balances Bar */}
+                <div className="p-3.5 rounded-lg bg-surface-raised border border-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-semantic-success animate-pulse" />
+                      <span className="text-xs font-bold text-text-primary uppercase tracking-wider">
+                        Burner Wallet Balances (Sepolia Testnet)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={loadBalances}
+                      disabled={isLoadingBalances}
+                      className="text-[11px] font-semibold text-accent hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isLoadingBalances ? 'animate-spin' : ''}`} />
+                      <span>{isLoadingBalances ? 'Refreshing...' : 'Refresh'}</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+                    <div className="p-2 rounded bg-surface border border-border">
+                      <div className="text-[10px] text-text-muted uppercase font-semibold">USDC Trading Capital</div>
+                      <div className="mono tnum text-xs font-bold text-accent">
+                        {burnerBalances ? `$${parseFloat(burnerBalances.usdc).toFixed(2)} USDC` : 'Loading...'}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-surface border border-border">
+                      <div className="text-[10px] text-text-muted uppercase font-semibold">WETH Position</div>
+                      <div className="mono tnum text-xs font-bold text-text-primary">
+                        {burnerBalances ? `${parseFloat(burnerBalances.weth).toFixed(4)} WETH` : 'Loading...'}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-surface border border-border">
+                      <div className="text-[10px] text-text-muted uppercase font-semibold">ETH (Gas Reserve)</div>
+                      <div className="mono tnum text-xs font-bold text-text-secondary">
+                        {burnerBalances ? `${parseFloat(burnerBalances.eth).toFixed(4)} ETH` : 'Loading...'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] text-text-muted flex justify-between items-center pt-1 px-1 border-t border-border/60">
+                    <span>FlashTradePool Vault Reserves:</span>
+                    <span className="mono font-semibold text-text-secondary">
+                      {vaultBalances ? `$${parseFloat(vaultBalances.usdc).toFixed(2)} USDC • ${parseFloat(vaultBalances.weth).toFixed(4)} WETH` : 'Loading...'}
+                    </span>
+                  </div>
+                </div>
+
                 <form onSubmit={handlePlaceOrderAndSignal} className="space-y-5">
                   
                   {/* Symbol Quick Pills */}
@@ -441,33 +524,48 @@ export default function LeaderTerminalPage() {
                   {/* Limit Price & Amount Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                        Limit Price (USD)
+                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                        <span>Limit Price</span>
+                        <span className="text-[10px] text-text-muted">USDC per 1 ETH</span>
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={limit}
-                        onChange={(e) => setLimit(e.target.value)}
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
-                      />
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 text-xs text-text-muted font-bold">$</span>
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          value={limit}
+                          onChange={(e) => setLimit(e.target.value)}
+                          required
+                          className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
+                        />
+                        <span className="absolute right-3.5 top-2.5 text-xs text-text-muted font-bold">USDC</span>
+                      </div>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5">
-                        Order Amount (Units)
+                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                        <span>Trading Capital (USDC)</span>
+                        <span className="text-[10px] text-accent font-bold">Currency: USDC</span>
                       </label>
-                      <input
-                        type="number"
-                        step="0.001"
-                        min="0.001"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
-                      />
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 text-xs text-text-muted font-bold">$</span>
+                        <input
+                          type="number"
+                          step="0.10"
+                          min="0.10"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          required
+                          className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
+                          placeholder="3.00"
+                        />
+                        <span className="absolute right-3.5 top-2.5 text-xs text-accent font-bold">USDC</span>
+                      </div>
+                      <p className="text-[11px] text-text-muted mt-1.5 flex justify-between">
+                        <span>Capital: <strong className="text-text-primary font-bold">${amount} USDC</strong></span>
+                        <span>Acquiring: <strong className="text-accent mono font-bold">~0.001 WETH</strong></span>
+                      </p>
                     </div>
                   </div>
 
@@ -476,29 +574,37 @@ export default function LeaderTerminalPage() {
                     <div>
                       <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
                         <span>Stop Loss (SL)</span>
-                        <span className="text-[10px] text-semantic-danger">Risk Guard</span>
+                        <span className="text-[10px] text-semantic-danger font-semibold">Exit Protection</span>
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={stopLoss}
-                        onChange={(e) => setStopLoss(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
-                      />
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 text-xs text-text-muted font-bold">$</span>
+                        <input
+                          type="number"
+                          step="1"
+                          value={stopLoss}
+                          onChange={(e) => setStopLoss(e.target.value)}
+                          className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
+                        />
+                        <span className="absolute right-3.5 top-2.5 text-xs text-semantic-danger font-bold">USDC</span>
+                      </div>
                     </div>
 
                     <div>
                       <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
                         <span>Target Price (TP)</span>
-                        <span className="text-[10px] text-semantic-success">Take Profit</span>
+                        <span className="text-[10px] text-semantic-success font-semibold">Take Profit</span>
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={target}
-                        onChange={(e) => setTarget(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
-                      />
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 text-xs text-text-muted font-bold">$</span>
+                        <input
+                          type="number"
+                          step="1"
+                          value={target}
+                          onChange={(e) => setTarget(e.target.value)}
+                          className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
+                        />
+                        <span className="absolute right-3.5 top-2.5 text-xs text-semantic-success font-bold">USDC</span>
+                      </div>
                     </div>
                   </div>
 

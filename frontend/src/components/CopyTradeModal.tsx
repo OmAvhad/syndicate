@@ -309,20 +309,26 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
             {/* Custom Amount Field (per spec.md: follower can change amount) */}
             <div>
               <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                <span>Your Order Size / Amount</span>
-                <span className="text-[11px] text-accent">Adjustable for your risk</span>
+                <span>Copy Trading Capital (USDC)</span>
+                <span className="text-[11px] text-accent font-bold">Dealing Currency: USDC</span>
               </label>
-              <input
-                type="number"
-                step="0.001"
-                min="0.001"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-                className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
-              />
-              <p className="text-[11px] text-text-muted mt-1">
-                Leader recommended size was {signal.amount} units. You can customize your position size.
+              <div className="relative">
+                <span className="absolute left-3.5 top-2.5 text-xs text-text-muted font-bold">$</span>
+                <input
+                  type="number"
+                  step="0.10"
+                  min="0.10"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  required
+                  className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
+                  placeholder="2.00"
+                />
+                <span className="absolute right-3.5 top-2.5 text-xs text-accent font-bold">USDC</span>
+              </div>
+              <p className="text-[11px] text-text-muted mt-1.5 flex justify-between">
+                <span>Leader allocation: <strong className="text-text-primary font-bold">${signal.amount} USDC</strong></span>
+                <span>You acquire: <strong className="text-accent mono font-bold">~0.0005 WETH</strong></span>
               </p>
             </div>
 
