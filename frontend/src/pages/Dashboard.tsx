@@ -7,6 +7,7 @@ import { formatDate, truncateHash } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import WalletConnectButton from '@/components/WalletConnectButton'
 import ShieldedPoolCard from '@/components/ShieldedPoolCard'
+import DashboardBalanceCard from '@/components/DashboardBalanceCard'
 import { getBaseScanAddressUrl } from '@/lib/network'
 import {
   Users,
@@ -269,6 +270,15 @@ export default function Dashboard() {
             })}
           </div>
         </div>
+
+        {/* Live Multi-Tier Account Balances (MetaMask + ZK Shielded + Execution Burner) */}
+        {user && (
+          <DashboardBalanceCard
+            key={`bal-${user.id}:${user.walletAddress || ''}`}
+            userId={user.id}
+            walletAddress={user.walletAddress}
+          />
+        )}
 
         {user && <ShieldedPoolCard key={`${user.id}:${user.walletAddress || ''}`} userId={user.id} walletAddress={user.walletAddress} />}
 
