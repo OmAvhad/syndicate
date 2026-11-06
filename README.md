@@ -1,6 +1,6 @@
 # 🌍 SyndicateCopy & WorldAuth — ETHMumbai Hackathon
 
-A privacy-preserving, zero-link copy trading protocol and authentication system powered by **World ID**, **Definitive Flash**, and **Base Sepolia**.
+A privacy-preserving, zero-link copy trading protocol and authentication system powered by **World ID**, **Definitive Flash**, **Kohaku / Railgun**, and **Ethereum Sepolia**.
 
 ---
 
@@ -8,10 +8,10 @@ A privacy-preserving, zero-link copy trading protocol and authentication system 
 
 Direct link: **[`http://localhost:5173/flash-trade`](http://localhost:5173/flash-trade)**
 
-For ETHGlobal Mumbai hackathon evaluation, the **Flash Trade Terminal** lets you simulate and execute live onchain trades on Base Sepolia using preloaded burner credentials without needing authentication:
+For ETHGlobal Mumbai hackathon evaluation, the **Flash Trade Terminal** lets you simulate and execute live onchain trades on Ethereum Sepolia using preloaded burner credentials without needing authentication:
 - **Bracket Orders** (Entry + Take-Profit + Stop-Loss in 1 signed intent)
 - **TWAP Orders** (Anti-frontrunning order slicing for followers)
-- **Live Base Sepolia WETH execution & EIP-712 Intent Signing**
+- **Live Ethereum Sepolia WETH execution & EIP-712 Intent Signing**
 - **Interactive Price Trigger Engine & Onchain Exit Settlement** (Bull $3,350 & Bear $2,800)
 - **Live JSON Transaction & Protocol Payload Inspector**
 
@@ -25,7 +25,8 @@ For ETHGlobal Mumbai hackathon evaluation, the **Flash Trade Terminal** lets you
 |-------|------|
 | Frontend | React 19 + Vite + TypeScript + viem |
 | Execution Engine | Definitive Flash Advanced Orders (Bracket, TWAP, Limit) |
-| Onchain Network | Base Sepolia Testnet (Chain ID `84532`) |
+| Privacy Layer | Kohaku / Railgun Privacy Pool on Ethereum Sepolia |
+| Onchain Network | Ethereum Sepolia Testnet (Chain ID `11155111`) |
 | Styling | Tailwind CSS + CRED-inspired Design System |
 | Auth SDK | `@worldcoin/idkit` (World ID v4) |
 | Backend | Node.js + Express (ESM) |
