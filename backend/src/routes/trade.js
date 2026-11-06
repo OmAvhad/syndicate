@@ -5,7 +5,7 @@ import User from '../models/User.js';
 import Follow from '../models/Follow.js';
 import Trade from '../models/Trade.js';
 import TradeSignal from '../models/TradeSignal.js';
-import { hashTradePayload, encryptTradeSignal, decryptTradeSignal } from '../services/tradeCrypto.js';
+import { hashTradePayload, encryptTradeSignal, decryptTradeSignal, encryptForMetaMask } from '../services/tradeCrypto.js';
 import { storeTradeSignalInArkiv } from '../services/arkiv.js';
 import { sendSignalToFollower, broadcastToAll } from '../websocket.js';
 
@@ -218,7 +218,7 @@ router.post('/signal', async (req, res) => {
       leaderId,
       status: 'active',
       expiresAt: { $gt: now },
-    }).populate('followerId', 'username walletAddress nullifierHash');
+    }).populate('followerId', 'username walletAddress nullifierHash encryptionPublicKey');
 
     if (activeFollows.length === 0) {
       return res.json({
@@ -240,8 +240,28 @@ router.post('/signal', async (req, res) => {
 
       const signalId = `sig_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-      // Encrypt the trade signal using the follower's public key
-      const encryptedTradeSignal = encryptTradeSignal(tradeData, follower.walletAddress);
+      let encryptedTradeSignal = '';
+      let encryptedPayloadHex = null;
+      let requiresMetaMaskDecrypt = false;
+
+      // If follower has an asymmetric encryption public key registered via eth_getEncryptionPublicKey:
+      if (follower.encryptionPublicKey) {
+        try {
+          const metaEnc = encryptForMetaMask(tradeData, follower.encryptionPublicKey);
+          encryptedTradeSignal = metaEnc.jsonString;
+          encryptedPayloadHex = metaEnc.encryptedHex;
+          requiresMetaMaskDecrypt = true;
+          console.log(`[Trade Signal] Encrypted using MetaMask ECIES public key for ${follower.username || follower._id}`);
+        } catch (encErr) {
+          console.warn('[Trade Signal] MetaMask encryption failed, falling back to AES-GCM:', encErr.message);
+        }
+      }
+
+      // Fallback to symmetric AES-GCM if no eth encryption key or failure
+      if (!encryptedPayloadHex) {
+        encryptedTradeSignal = encryptTradeSignal(tradeData, follower.walletAddress);
+        requiresMetaMaskDecrypt = false;
+      }
 
       // Save entity to ArkDB / Arkiv with 10-minute TTL
       const arkivResult = await storeTradeSignalInArkiv({
@@ -260,6 +280,8 @@ router.post('/signal', async (req, res) => {
         followerId: follower._id,
         followerPublicKey: follower.walletAddress,
         encryptedTradeSignal,
+        encryptedPayloadHex,
+        requiresMetaMaskDecrypt,
         tradePayload: tradeData,
         arkivEntityKey: arkivResult.entityKey,
         arkivTxHash: arkivResult.txHash,
@@ -268,33 +290,37 @@ router.post('/signal', async (req, res) => {
         status: 'ACTIVE',
       });
 
-      // Decrypt trade data specifically for the follower UI
-      const decryptedForFollower = {
+      // Payload delivered to the follower
+      const signalMessage = {
         signalId,
         leaderPublicKey: leader.walletAddress,
         leaderUsername: leader.username || 'Verified Leader',
         symbol: tradeData.symbol,
         side: tradeData.side,
         orderType: tradeData.orderType,
-        limit: tradeData.limit,
-        amount: tradeData.amount,
-        stopLoss: tradeData.stopLoss,
-        target: tradeData.target,
-        burnerAccountAddress: tradeData.burnerAccountAddress,
         arkivEntityKey: arkivResult.entityKey,
         ttlSeconds,
         expiresAt: expiresAt.toISOString(),
         createdAt: now.toISOString(),
+        requiresMetaMaskDecrypt,
+        encryptedPayloadHex,
+        // If not requiring MetaMask decrypt, provide the initial plain numbers
+        limit: requiresMetaMaskDecrypt ? null : tradeData.limit,
+        amount: requiresMetaMaskDecrypt ? null : tradeData.amount,
+        stopLoss: requiresMetaMaskDecrypt ? null : tradeData.stopLoss,
+        target: requiresMetaMaskDecrypt ? null : tradeData.target,
+        burnerAccountAddress: requiresMetaMaskDecrypt ? null : tradeData.burnerAccountAddress,
       };
 
       // 3. Send over WebSocket directly to follower in real-time
-      const sentCount = sendSignalToFollower(follower._id.toString(), decryptedForFollower);
-      console.log(`[Trade Signal] Dispatched signal ${signalId} to follower ${follower.username || follower._id} (WebSockets active: ${sentCount})`);
+      const sentCount = sendSignalToFollower(follower._id.toString(), signalMessage);
+      console.log(`[Trade Signal] Dispatched signal ${signalId} to follower ${follower.username || follower._id} (requiresMetaMask: ${requiresMetaMaskDecrypt}, WebSockets active: ${sentCount})`);
 
       createdSignals.push({
         signalId,
         followerId: follower._id,
         arkivEntityKey: arkivResult.entityKey,
+        requiresMetaMaskDecrypt,
       });
     }
 
@@ -340,11 +366,13 @@ router.get('/signals/active', async (req, res) => {
         symbol: s.tradePayload?.symbol,
         side: s.tradePayload?.side,
         orderType: s.tradePayload?.orderType,
-        limit: s.tradePayload?.limit,
-        amount: s.tradePayload?.amount,
-        stopLoss: s.tradePayload?.stopLoss,
-        target: s.tradePayload?.target,
-        burnerAccountAddress: s.tradePayload?.burnerAccountAddress,
+        requiresMetaMaskDecrypt: Boolean(s.requiresMetaMaskDecrypt),
+        encryptedPayloadHex: s.encryptedPayloadHex || null,
+        limit: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.limit,
+        amount: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.amount,
+        stopLoss: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.stopLoss,
+        target: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.target,
+        burnerAccountAddress: s.requiresMetaMaskDecrypt ? null : s.tradePayload?.burnerAccountAddress,
         arkivEntityKey: s.arkivEntityKey,
         ttlSeconds: s.ttlSeconds,
         remainingSeconds,

@@ -5,7 +5,7 @@ import {
   ExpirationTime,
 } from '@arkiv-network/sdk';
 import { rabdi } from '@arkiv-network/sdk/chains';
-import { addr, defineSchema, str, u64 } from '@arkiv-network/sdk/schema';
+import { addr, bytes, defineSchema, str, u64 } from '@arkiv-network/sdk/schema';
 import { http, isHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import crypto from 'crypto';
@@ -45,7 +45,7 @@ export const FollowerSchema = defineSchema('follower_relationships', {
  */
 export const TradeSignalSchema = defineSchema('trade_signals', {
   signalId:             str().indexed(),
-  encryptedTradeSignal: str(),
+  encryptedTradeSignal: bytes(),
   leaderPublicKey:      addr().indexed(),
   followerPublicKey:    addr().indexed(),
   ttl:                  u64().indexed(),
@@ -200,7 +200,7 @@ export async function storeTradeSignalInArkiv({
 }) {
   const payload = {
     signalId: str(signalId),
-    encryptedTradeSignal: str(encryptedTradeSignal),
+    encryptedTradeSignal: bytes(Buffer.from(encryptedTradeSignal, 'utf8')),
     leaderPublicKey: addr(leaderPublicKey),
     followerPublicKey: addr(followerPublicKey),
     ttl: u64(BigInt(ttl)),

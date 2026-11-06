@@ -76,3 +76,43 @@ export function getArkivDataExplorerUrl(): string {
   return 'https://data.arkiv.network'
 }
 
+/**
+ * Requests the user's Curve25519 encryption public key via MetaMask (eth_getEncryptionPublicKey).
+ * This key is registered on the backend to encrypt trade signals using ECIES (x25519-xsalsa20-poly1305).
+ */
+export async function getMetaMaskEncryptionPublicKey(address: string): Promise<string> {
+  if (typeof window === 'undefined' || !window.ethereum) {
+    throw new Error('MetaMask is not installed.')
+  }
+
+  const encryptionPublicKey = (await window.ethereum.request({
+    method: 'eth_getEncryptionPublicKey',
+    params: [address],
+  })) as string
+
+  return encryptionPublicKey
+}
+
+/**
+ * Decrypts an ECIES payload encrypted for this wallet using MetaMask's private key (eth_decrypt).
+ * @param encryptedHex - The 0x-prefixed hex string of the encrypted payload JSON.
+ * @param address - The recipient account address in MetaMask holding the private key.
+ */
+export async function decryptWithMetaMask<T = unknown>(encryptedHex: string, address: string): Promise<T> {
+  if (typeof window === 'undefined' || !window.ethereum) {
+    throw new Error('MetaMask is not installed.')
+  }
+
+  const decryptedUtf8 = (await window.ethereum.request({
+    method: 'eth_decrypt',
+    params: [encryptedHex, address],
+  })) as string
+
+  try {
+    return JSON.parse(decryptedUtf8) as T
+  } catch {
+    return decryptedUtf8 as unknown as T
+  }
+}
+
+

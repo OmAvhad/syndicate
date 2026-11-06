@@ -7,11 +7,14 @@ import {
   ArrowDownRight,
   X,
   Radio,
-  Database,
+  Lock,
+  KeyRound,
+  ShieldCheck,
+  Loader2,
 } from 'lucide-react'
 
 export default function TradeSignalBanner() {
-  const { signals, selectedSignal, openCopyModal, closeCopyModal, dismissSignal } = useSignals()
+  const { signals, selectedSignal, openCopyModal, closeCopyModal, dismissSignal, decryptSignal } = useSignals()
 
   if (signals.length === 0 && !selectedSignal) {
     return null
@@ -29,6 +32,7 @@ export default function TradeSignalBanner() {
       <div className="fixed bottom-6 right-6 z-40 max-w-sm w-full space-y-3 pointer-events-none">
         {signals.map((sig: TradeSignalItem) => {
           const isBuy = sig.side === 'BUY' || sig.side === 'LONG'
+          const isEncrypted = Boolean(sig.requiresMetaMaskDecrypt && !sig.isDecrypted)
 
           return (
             <div
@@ -43,6 +47,12 @@ export default function TradeSignalBanner() {
                     <Radio className="w-3 h-3 text-accent" />
                     Incoming Trade Signal
                   </span>
+                  {isEncrypted && (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-accent-soft text-accent border border-accent/30 font-semibold flex items-center gap-0.5">
+                      <Lock className="w-2.5 h-2.5" />
+                      Encrypted
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -82,24 +92,47 @@ export default function TradeSignalBanner() {
 
                 <div className="text-right">
                   <div className="text-[10px] uppercase font-semibold text-text-muted">Entry Price</div>
-                  <div className="mono tnum text-xs font-bold text-text-primary">${sig.limit}</div>
+                  {isEncrypted ? (
+                    <div className="mono tnum text-xs font-bold text-accent flex items-center justify-end gap-1">
+                      <Lock className="w-3 h-3" />
+                      <span>Encrypted</span>
+                    </div>
+                  ) : (
+                    <div className="mono tnum text-xs font-bold text-text-primary">${sig.limit}</div>
+                  )}
                 </div>
               </div>
 
               {/* Targets & Action */}
               <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/80">
-                <div className="flex items-center gap-3 text-[11px] text-text-secondary">
-                  <span>TP: <strong className="text-semantic-success mono tnum">${sig.target}</strong></span>
-                  <span>SL: <strong className="text-semantic-danger mono tnum">${sig.stopLoss}</strong></span>
-                </div>
+                {isEncrypted ? (
+                  <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                    <KeyRound className="w-3.5 h-3.5 text-accent" />
+                    <span>MetaMask private key required</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 text-[11px] text-text-secondary">
+                    <span>TP: <strong className="text-semantic-success mono tnum">${sig.target}</strong></span>
+                    <span>SL: <strong className="text-semantic-danger mono tnum">${sig.stopLoss}</strong></span>
+                  </div>
+                )}
 
                 <button
                   type="button"
                   onClick={() => openCopyModal(sig)}
-                  className="py-1.5 px-3 rounded-md bg-accent text-text-inverse font-bold text-xs hover:bg-[#d4f885] transition-all flex items-center gap-1 cursor-pointer shadow-[0_2px_10px_rgba(198,243,106,0.2)]"
+                  className="py-1.5 px-3 rounded-md bg-accent text-text-inverse font-bold text-xs hover:bg-[#d4f885] transition-all flex items-center gap-1.5 cursor-pointer shadow-[0_2px_10px_rgba(198,243,106,0.2)]"
                 >
-                  <TrendingUp className="w-3 h-3 stroke-[2.2]" />
-                  <span>Copy Trade</span>
+                  {isEncrypted ? (
+                    <>
+                      <KeyRound className="w-3 h-3 stroke-[2.2]" />
+                      <span>Decrypt & Copy</span>
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUp className="w-3 h-3 stroke-[2.2]" />
+                      <span>Copy Trade</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
