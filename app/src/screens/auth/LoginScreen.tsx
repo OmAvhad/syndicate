@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Linking,
   Platform,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -22,39 +21,20 @@ import {
 } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
+import { WorldIDModal } from '../../components/WorldIDModal'
 // import { BackendStatusCard } from '../../components/BackendStatusCard'
 
 export function LoginScreen() {
   const insets = useSafeAreaInsets()
-  const { simulateSandboxLogin, isLoading } = useAuth()
+  const { login, simulateSandboxLogin, isLoading } = useAuth()
   const { colors, mode, toggleTheme } = useTheme()
+  const [showWorldIdModal, setShowWorldIdModal] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
 
-  const handleWorldAppDeepLink = async () => {
-    setIsVerifying(true)
-    setNotice('Connecting to World App...')
-
-    const deepLinkUrl = 'worldcoin://verify?app_id=app_staging_syndicate&action=login'
-
-    try {
-      const supported = await Linking.canOpenURL(deepLinkUrl)
-      if (supported) {
-        await Linking.openURL(deepLinkUrl)
-      } else {
-        setNotice('World App not detected. Launching Sandbox demo...')
-        setTimeout(() => {
-          simulateSandboxLogin()
-          setIsVerifying(false)
-        }, 1200)
-      }
-    } catch {
-      setNotice('Running verification...')
-      setTimeout(() => {
-        simulateSandboxLogin()
-        setIsVerifying(false)
-      }, 1000)
-    }
+  const handleOpenWorldID = () => {
+    setNotice(null)
+    setShowWorldIdModal(true)
   }
 
   const handleSandboxVerify = async () => {
@@ -152,13 +132,13 @@ export function LoginScreen() {
         {/* Primary CTA Button: 56px Height, High Contrast */}
         <TouchableOpacity
           style={[styles.primaryCta, { backgroundColor: colors.accent }]}
-          onPress={handleWorldAppDeepLink}
-          disabled={isVerifying || isLoading}
+          onPress={handleOpenWorldID}
+          disabled={isLoading}
           activeOpacity={0.85}
         >
           <Fingerprint size={20} color={colors.textInverse} strokeWidth={2.4} />
           <Text style={[styles.primaryCtaText, { color: colors.textInverse }]}>
-            {isVerifying ? 'Connecting...' : 'Verify with World ID'}
+            Verify with World ID
           </Text>
           <ArrowRight size={18} color={colors.textInverse} strokeWidth={2.4} />
         </TouchableOpacity>
@@ -181,6 +161,15 @@ export function LoginScreen() {
           Zero KYC • Private keys remain in your device enclave
         </Text>
       </View>
+
+      {/* Official World ID Modal with Live QR & Bridge Verification */}
+      <WorldIDModal
+        visible={showWorldIdModal}
+        onClose={() => setShowWorldIdModal(false)}
+        onSuccess={(token, user) => {
+          login(token, user)
+        }}
+      />
     </View>
   )
 }
