@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
 import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
+import { closeTrade, usdc } from '@/lib/tradeJournal'
 import {
   executeTwoLegEntrySwap,
   executeTwoLegExitSwap,
@@ -145,6 +146,7 @@ export default function LeaderTerminalPage() {
       setSymbol(inputs.symbol); setSide(inputs.side); setOrderType(inputs.orderType)
       setLimit(inputs.limit); setStopLoss(inputs.stopLoss); setTarget(inputs.target)
       if (saved.entry) setOnchainResult(saved.entry)
+      if (saved.tradeId && saved.entry) setExecutionResult({ tradeId: saved.tradeId, executionTxHash: saved.entry.leg1TxHash })
       if (saved.promise) setPromiseData(saved.promise)
       if (saved.stage === 'open') setStep('completed')
       setFundingEvidence({ operation: saved.userOpHash, transaction: saved.fundingTxHash })
@@ -413,7 +415,7 @@ export default function LeaderTerminalPage() {
           entryPrice: `$${limit}`,
           takeProfitTarget: `$${target} (+${targetGainPct}% / +$${targetGainUsdc} USDC)`,
           stopLossTarget: `$${stopLoss} (-${stopLossRiskPct}% / -$${stopLossRiskUsdc} USDC)`,
-          unrealizedPnL: `+$${(usdcCapital * 0.0283).toFixed(2)} USDC (+2.83% Mark)`,
+          unrealizedPnL: 'Not calculated: no live mark-price feed',
           blockNumber: onchainRes.blockNumber,
           gasUsed: onchainRes.gasUsed,
           settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
@@ -436,12 +438,14 @@ export default function LeaderTerminalPage() {
           payloadHash: pData.payloadHash,
           promiseId: pData.promiseId,
           executionTxHash: onchainRes.leg1TxHash,
+          entryDeliveryTxHash: onchainRes.leg2TxHash,
           isCopyTrade: false,
         }),
         api.post('/api/trades/signal', {
           ...tradePayload,
           tradeIndex: pData.tradeIndex,
           payloadHash: pData.payloadHash,
+          promiseId: pData.promiseId,
         }),
       ])
 
@@ -453,6 +457,9 @@ export default function LeaderTerminalPage() {
         tradeId: execRes.data.tradeId,
         executionTxHash: onchainRes.leg1TxHash,
       })
+      burner.tradeId = execRes.data.tradeId
+      funding.saveTradingBurner(currentScope, burner)
+      window.dispatchEvent(new Event('syndicate:trades-changed'))
 
       addTradeLog('success', `Order fill recorded in protocol state (orderType: BRACKET)`)
 
@@ -498,76 +505,24 @@ export default function LeaderTerminalPage() {
     }
   }
 
-  // Trigger onchain exit settlement (Take-Profit hit at $3,350)
-  const handleTriggerTakeProfitExit = async () => {
+  const handleLeaderExit = async (exit: 'tp' | 'sl') => {
+    if (isExiting || exitResult) return
+    setIsExiting(true); setErrorMessage(null)
     try {
-      if (!scope || !burnerRef.current?.entry) throw new Error('Restore the local burner for this open position first.')
-      setIsExiting(true)
-      setErrorMessage(null)
-      const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
-      const grossUsdc = Number((usdcCapital * 1.1167).toFixed(2)) // +11.67% target
-      const feeUsdc = Number((usdcCapital * 0.003).toFixed(2)) // 30 bps protocol fee
-      const profitUsdc = Number((usdcCapital * 1.113).toFixed(2)) // 11.3% net profit released
-      const netProfitAmount = Number((profitUsdc - usdcCapital).toFixed(2))
-
-      addTradeLog('info', `Take-Profit Trigger Hit ($3,350.00): Initiating onchain exit settlement...`)
-      addTradeLog('onchain', `Returning 0.001 WETH position to FlashTradePool Vault...`)
-
-      const exitReceipt = await executeTwoLegExitSwap({
-        traderKey: burnerRef.current.privateKey,
-        wethAmountNumber: 0.001,
-        usdcReturnAmountNumber: profitUsdc,
-        onLog: (msg) => {
-          console.log(`[Exit Settlement] ${msg}`)
-          if (msg.includes('Leg 1: Returned WETH position to Vault')) {
-            addTradeLog('onchain', `Leg 1: WETH returned to Vault (Tx mined on Sepolia)`)
-          } else if (msg.includes('Leg 2: Vault released USDC with profit')) {
-            addTradeLog('onchain', `Leg 2: Vault released $${profitUsdc.toFixed(2)} USDC to Burner`)
-          }
-        },
-      })
-
-      setExitResult(exitReceipt)
+      const tradeId = executionResult?.tradeId || burnerRef.current?.tradeId
+      if (!scope || !tradeId || !burnerRef.current) throw new Error('Open Trade History and recover this local entry before exiting.')
+      const settled = await closeTrade(scope, tradeId, exit, message => addTradeLog('onchain', message))
+      setExitResult(settled.receipt)
       burnerRef.current.stage = 'closed'
       const funding = await import('@/lib/shielded/tradeFunding')
       funding.saveTradingBurner(scope, burnerRef.current)
+      addTradeLog('success', `Exit confirmed. Realized P/L: ${usdc(settled.trade.realizedPnlUnits)} USDC before native gas.`, { label: 'USDC payout', url: settled.receipt.leg2ExplorerUrl })
       await loadBalances()
-      setTimeout(() => { loadBalances() }, 2500)
-
-      addTradeLog(
-        'success',
-        `Exit Settled Onchain! Realized Net Profit: +$${netProfitAmount.toFixed(2)} USDC (+11.30%)`,
-        { label: 'Etherscan USDC Release', url: exitReceipt.leg2ExplorerUrl }
-      )
-
-      // Log Exit Settlement Event for Judges
-      logJudgeEvent({
-        category: 'EXIT_SETTLEMENT',
-        title: `Take-Profit Target Hit ($3,350) & Onchain Exit Settlement`,
-        details: {
-          wethPositionClosed: '0.001 WETH',
-          initialCapital: `$${usdcCapital.toFixed(2)} USDC`,
-          grossPayout: `$${grossUsdc.toFixed(2)} USDC (+11.67%)`,
-          protocolFee: `-$${feeUsdc.toFixed(2)} USDC (30 bps)`,
-          netUsdcReleased: `$${profitUsdc.toFixed(2)} USDC`,
-          realizedNetProfit: `+$${netProfitAmount.toFixed(2)} USDC (+11.30% Net)`,
-          blockNumber: exitReceipt.blockNumber,
-          gasUsed: exitReceipt.gasUsed,
-          settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
-        },
-        links: [
-          { label: `Etherscan Exit Leg 1 (WETH Return: ${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
-          { label: `Etherscan Exit Leg 2 (USDC Profit Release: ${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
-        ],
-      })
-    } catch (err: unknown) {
-      const e = err as Error
-      console.error('[Exit Settlement] Error:', e)
-      setErrorMessage(`Exit settlement failed: ${e.message}`)
-    } finally {
-      setIsExiting(false)
-    }
+    } catch (error) { setErrorMessage((error as Error).message) }
+    finally { setIsExiting(false) }
   }
+  const handleTriggerTakeProfitExit = () => handleLeaderExit('tp')
+  const handleTriggerStopLossExit = () => handleLeaderExit('sl')
 
   const handleReset = () => {
     if (burnerRef.current && burnerRef.current.stage !== 'closed') {
@@ -1089,96 +1044,12 @@ export default function LeaderTerminalPage() {
                     </div>
                   )}
 
-                  {/* Trade Profit & Loss (PnL) Panel */}
-                  {onchainResult && (
-                    <div className="p-3.5 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 shadow-sm text-zinc-950 dark:text-zinc-100 space-y-2.5">
-                      <div className="flex items-center justify-between pb-1.5 border-b border-zinc-300 dark:border-zinc-800">
-                        <div className="flex items-center gap-1.5">
-                          <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-accent" />
-                          <span className="text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">
-                            Profit / Loss (PnL) & Settlement
-                          </span>
-                        </div>
-                        {exitResult ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded font-black bg-emerald-100 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                            TAKE-PROFIT SETTLED
-                          </span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded font-black bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                            POSITION ACTIVE
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Capital & Position Summary */}
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="p-2 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                          <div className="text-[10px] font-bold text-zinc-700 dark:text-zinc-400 uppercase">Capital Invested</div>
-                          <div className="text-sm font-black text-zinc-950 dark:text-white mono">
-                            ${Number(amount || 100).toFixed(2)} USDC
-                          </div>
-                        </div>
-
-                        <div className="p-2 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                          <div className="text-[10px] font-bold text-zinc-700 dark:text-zinc-400 uppercase">Position Size</div>
-                          <div className="text-sm font-black text-zinc-950 dark:text-white mono">
-                            0.001 WETH
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Dynamic PnL Breakdown */}
-                      {exitResult ? (
-                        <div className="p-2.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 space-y-1.5">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-bold text-zinc-950 dark:text-zinc-200">Realized Net Profit:</span>
-                            <span className="mono font-black text-emerald-800 dark:text-emerald-300 text-sm">
-                              +${(Number(amount || 100) * 0.113).toFixed(2)} USDC (+11.30% Net)
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px] text-zinc-700 dark:text-zinc-300">
-                            <span>Gross Return:</span>
-                            <span className="mono font-semibold text-zinc-900 dark:text-zinc-200">
-                              ${(Number(amount || 100) * 1.1167).toFixed(2)} USDC
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px] text-zinc-700 dark:text-zinc-300">
-                            <span>Protocol Fee (30 bps):</span>
-                            <span className="mono font-semibold text-zinc-900 dark:text-zinc-200">
-                              -${(Number(amount || 100) * 0.003).toFixed(2)} USDC
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px] text-zinc-900 dark:text-zinc-200 pt-1 border-t border-emerald-200 dark:border-emerald-800 font-bold">
-                            <span>Net Payout to Burner:</span>
-                            <span className="mono font-black text-emerald-900 dark:text-emerald-200">
-                              ${(Number(amount || 100) * 1.113).toFixed(2)} USDC
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-2.5 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 space-y-1.5 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold text-zinc-900 dark:text-zinc-200">Unrealized Mark PnL:</span>
-                            <span className="mono font-black text-emerald-700 dark:text-emerald-400">
-                              +${(Number(amount || 100) * 0.0283).toFixed(2)} USDC (+2.83%)
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-zinc-700 dark:text-zinc-400">Target Profit (@ ${target}):</span>
-                            <span className="mono font-bold text-emerald-700 dark:text-emerald-400">
-                              +${(Number(amount || 100) * (Number(target || 3350) - Number(limit || 3000)) / Number(limit || 3000)).toFixed(2)} USDC (+{(((Number(target || 3350) - Number(limit || 3000)) / Number(limit || 3000)) * 100).toFixed(1)}%)
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-zinc-700 dark:text-zinc-400">Stop Loss Risk (@ ${stopLoss}):</span>
-                            <span className="mono font-bold text-red-600 dark:text-red-400">
-                              -${(Number(amount || 100) * (Number(limit || 3000) - Number(stopLoss || 2900)) / Number(limit || 3000)).toFixed(2)} USDC (-{(((Number(limit || 3000) - Number(stopLoss || 2900)) / Number(limit || 3000)) * 100).toFixed(1)}%)
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {onchainResult && <div className="p-3.5 rounded-md bg-surface-raised border border-border space-y-2 text-sm">
+                    <p className="font-semibold">Position & realized result</p>
+                    <p>Entry: {onchainResult.usdcAmount} USDC · Position: {onchainResult.wethAmount} WETH</p>
+                    {exitResult ? <><p>Confirmed payout: {exitResult.usdcAmount} USDC</p><p>Realized P/L: {(Number(exitResult.usdcAmount) - Number(onchainResult.usdcAmount)).toFixed(6)} USDC before native gas.</p></> : <p className="text-text-muted">Position open. Live unrealized P/L is unavailable.</p>}
+                    <Link to="/history" className="text-accent underline text-xs">Full receipts, gas and promise claim</Link>
+                  </div>}
 
                   {/* Interactive Terminal Audit Logs (High Contrast Dark Box) */}
                   {tradeLogs.length > 0 && (
@@ -1294,16 +1165,18 @@ export default function LeaderTerminalPage() {
                       ) : exitResult ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-semantic-success" />
-                          <span>Take-Profit Trigger Executed & Closed</span>
+                          <span>Position Closed</span>
                         </>
                       ) : (
                         <>
                           <TrendingUp className="w-3.5 h-3.5" />
-                          <span>Trigger Bull Exit: Take-Profit ($3,350)</span>
+                          <span>Trigger Bull Exit: Take-Profit (${target})</span>
                         </>
                       )}
                     </button>
 
+                    <button type="button" onClick={handleTriggerStopLossExit} disabled={isExiting || Boolean(exitResult)} className="w-full py-2.5 px-3 rounded-md bg-semantic-danger/15 border border-semantic-danger/50 text-semantic-danger font-bold text-xs disabled:opacity-50">Trigger Bear Exit: Stop-Loss (${stopLoss})</button>
+                    <Link to="/history" className="block text-xs text-accent underline">View history, realized P/L & Claim Promise</Link>
                     {exitResult && (
                       <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-zinc-950 dark:text-zinc-100 space-y-1.5 shadow-sm">
                         <div className="text-[11px] font-black text-emerald-900 dark:text-emerald-300 flex items-center justify-between">

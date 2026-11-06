@@ -225,11 +225,19 @@ export async function executeTwoLegExitSwap({
   wethAmountNumber = 0.001,
   usdcReturnAmountNumber,
   onLog,
+  wethUnits,
+  usdcReturnUnits,
+  resume = {},
+  onSubmitted,
 }: {
   traderKey?: `0x${string}`
   wethAmountNumber?: number
   usdcReturnAmountNumber: number
   onLog?: (msg: string) => void
+  wethUnits?: bigint
+  usdcReturnUnits?: bigint
+  resume?: { leg1TxHash?: Hash; leg2TxHash?: Hash }
+  onSubmitted?: (leg: 'leg1TxHash' | 'leg2TxHash', hash: Hash) => void
 }): Promise<OnchainExecutionResult> {
   const log = onLog || console.log
   const traderAccount = privateKeyToAccount(traderKey)
@@ -247,18 +255,21 @@ export async function executeTwoLegExitSwap({
     transport: sepoliaTransport(),
   })
 
-  const wethBigInt = parseEther(wethAmountNumber.toFixed(6))
-  const usdcBigInt = parseUnits(usdcReturnAmountNumber.toFixed(2), 6)
+  const wethBigInt = wethUnits ?? parseEther(wethAmountNumber.toFixed(6))
+  const usdcBigInt = usdcReturnUnits ?? parseUnits(usdcReturnAmountNumber.toFixed(2), 6)
+  const vaultUsdc = await publicClient.readContract({ address: USDC_SEPOLIA, abi: ERC20_ABI, functionName: 'balanceOf', args: [FLASH_TRADE_POOL_ADDRESS] })
+  if (!resume.leg2TxHash && vaultUsdc < usdcBigInt) throw new Error('Demo vault has insufficient USDC for this exit. The position return has not been resubmitted.')
 
   log(`[Exit Leg 1/2] Trader returning ${wethAmountNumber} WETH to Vault...`)
 
   // Exit Leg 1: Trader -> Vault (WETH)
-  const leg1TxHash = await traderWallet.writeContract({
+  const leg1TxHash = resume.leg1TxHash ?? await traderWallet.writeContract({
     address: WETH_SEPOLIA,
     abi: ERC20_ABI,
     functionName: 'transfer',
     args: [FLASH_TRADE_POOL_ADDRESS, wethBigInt],
   })
+  onSubmitted?.('leg1TxHash', leg1TxHash)
 
   log(`[Exit Leg 1/2] WETH return broadcasted: ${leg1TxHash}`)
   const receipt1 = await publicClient.waitForTransactionReceipt({ hash: leg1TxHash })
@@ -267,12 +278,13 @@ export async function executeTwoLegExitSwap({
 
   // Exit Leg 2: Vault -> Trader (USDC with profit)
   log(`[Exit Leg 2/2] Vault releasing $${usdcReturnAmountNumber.toFixed(2)} USDC with profit to trader...`)
-  const leg2TxHash = await poolWallet.writeContract({
+  const leg2TxHash = resume.leg2TxHash ?? await poolWallet.writeContract({
     address: USDC_SEPOLIA,
     abi: ERC20_ABI,
     functionName: 'transfer',
     args: [traderAccount.address, usdcBigInt],
   })
+  onSubmitted?.('leg2TxHash', leg2TxHash)
 
   log(`[Exit Leg 2/2] USDC release broadcasted: ${leg2TxHash}`)
   const receipt2 = await publicClient.waitForTransactionReceipt({ hash: leg2TxHash })
@@ -286,8 +298,8 @@ export async function executeTwoLegExitSwap({
     leg2ExplorerUrl: `https://sepolia.etherscan.io/tx/${leg2TxHash}`,
     blockNumber: Number(receipt1.blockNumber),
     gasUsed: (receipt1.gasUsed + receipt2.gasUsed).toString(),
-    usdcAmount: usdcReturnAmountNumber.toFixed(2),
-    wethAmount: wethAmountNumber.toFixed(6),
+    usdcAmount: formatUnits(usdcBigInt, 6),
+    wethAmount: formatUnits(wethBigInt, 18),
     traderAddress: traderAccount.address,
   }
 }

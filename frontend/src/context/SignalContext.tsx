@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext'
 import api from '@/lib/api'
-import { decryptWithMetaMask } from '@/lib/network'
+import { decryptWithMetaMask, getMetaMaskEncryptionPublicKey } from '@/lib/network'
 
 export interface TradeSignalItem {
   signalId: string
@@ -36,8 +36,8 @@ interface SignalContextType {
   openCopyModal: (signal: TradeSignalItem) => void
   closeCopyModal: () => void
   dismissSignal: (signalId: string) => void
-  decryptSignal: (signalId: string) => Promise<{ success: boolean; error?: string }>
-  executeCopyTrade: (signalId: string, customAmount: number, executionTxHash?: string) => Promise<{ success: boolean; error?: string; tradeId?: string }>
+  decryptSignal: (signalId: string, refreshEncryption?: boolean) => Promise<{ success: boolean; error?: string }>
+  executeCopyTrade: (signalId: string, customAmount: number, executionTxHash?: string, entryDeliveryTxHash?: string, burner?: string) => Promise<{ success: boolean; error?: string; tradeId?: string }>
   isConnected: boolean
   refreshSignals: () => Promise<void>
 }
@@ -224,7 +224,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
   }
 
   // True asymmetric private-key decryption via MetaMask eth_decrypt
-  const decryptSignal = async (signalId: string): Promise<{ success: boolean; error?: string }> => {
+  const decryptSignal = async (signalId: string, refreshEncryption = false): Promise<{ success: boolean; error?: string }> => {
     const target = signals.find((s) => s.signalId === signalId) || selectedSignal
     if (!target) return { success: false, error: 'Signal not found or expired' }
 
@@ -251,8 +251,18 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      let encryptedPayloadHex = target.encryptedPayloadHex
+      if (refreshEncryption) {
+        const accounts = await window.ethereum?.request({ method: 'eth_requestAccounts' }) as string[] | undefined
+        if (accounts?.[0]?.toLowerCase() !== user.walletAddress.toLowerCase()) throw new Error('Select your linked follower wallet before refreshing encryption.')
+        const encryptionPublicKey = await getMetaMaskEncryptionPublicKey(user.walletAddress)
+        const response = await api.post(`/api/trades/signals/${encodeURIComponent(signalId)}/refresh-encryption`, { encryptionPublicKey, walletAddress: user.walletAddress })
+        encryptedPayloadHex = response.data.encryptedPayloadHex
+        setSignals(prev => prev.map(s => s.signalId === signalId ? { ...s, encryptedPayloadHex } : s))
+        setSelectedSignal(prev => prev?.signalId === signalId ? { ...prev, encryptedPayloadHex } : prev)
+      }
       const decrypted = await decryptWithMetaMask<Record<string, unknown>>(
-        target.encryptedPayloadHex,
+        encryptedPayloadHex!,
         user.walletAddress
       )
 
@@ -295,7 +305,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
   }
 
   // Execute trade order for follower
-  const executeCopyTrade = async (signalId: string, customAmount: number, executionTxHash?: string) => {
+  const executeCopyTrade = async (signalId: string, customAmount: number, executionTxHash?: string, entryDeliveryTxHash?: string, burner?: string) => {
     const target = signals.find((s) => s.signalId === signalId) || selectedSignal
     if (!target) return { success: false, error: 'Signal not found or expired' }
 
@@ -315,16 +325,19 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
         amount: customAmount,
         stopLoss: target.stopLoss,
         target: target.target,
-        burnerAccountAddress: target.burnerAccountAddress,
+        burnerAccountAddress: burner,
         tradeIndex: target.tradeIndex || 1,
         isCopyTrade: true,
         originalSignalId: target.signalId,
         executionTxHash: executionTxHash || undefined,
+        entryDeliveryTxHash,
       })
 
       if (res.data?.success) {
         // Remove from active signals
-        dismissSignal(signalId)
+        // Keep the selected modal mounted to show the receipt and exit controls.
+        setSignals(prev => prev.filter(signal => signal.signalId !== signalId))
+        window.dispatchEvent(new Event('syndicate:trades-changed'))
         return { success: true, tradeId: res.data.tradeId }
       } else {
         return { success: false, error: res.data?.error || 'Execution failed' }

@@ -55,6 +55,8 @@ const tradeSignalSchema = new mongoose.Schema(
       target: Number,
       burnerAccountAddress: String,
       payloadHash: String,
+      promiseId: String,
+      tradeIndex: Number,
     },
     arkivEntityKey: {
       type: String,

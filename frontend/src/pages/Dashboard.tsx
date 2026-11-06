@@ -151,6 +151,7 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
+              <Link to="/history" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-surface-raised border border-border text-xs font-semibold text-text-primary">Trade history & P/L</Link>
               <Link
                 to="/trade"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-all shadow-[0_2px_12px_rgba(198,243,106,0.18)]"

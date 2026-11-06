@@ -5,6 +5,9 @@ import User from '../models/User.js';
 import Follow from '../models/Follow.js';
 import Trade from '../models/Trade.js';
 import TradeSignal from '../models/TradeSignal.js';
+import TradePromise from '../models/TradePromise.js';
+import { verifiedTransfer, VAULT, USDC, WETH, exitPayout, blockTimestamp } from '../services/tradeReceipts.js';
+import { claimTradeResult, readResultClaims, matchingClaim } from '../services/promiseClaims.js';
 import { hashTradePayload, encryptTradeSignal, decryptTradeSignal, encryptForMetaMask } from '../services/tradeCrypto.js';
 import { storeTradeSignalInArkiv, storeTradePromiseInArkiv } from '../services/arkiv.js';
 import { sendSignalToFollower, broadcastToAll } from '../websocket.js';
@@ -37,9 +40,9 @@ router.post('/promise', async (req, res) => {
     }
 
     // Retrieve leader to compute sequential trade counter (Trade #1, Trade #2...)
-    const leader = await User.findById(req.user.userId);
-    const tradeIndex = (leader?.tradeCount || 0) + 1;
-    await User.findByIdAndUpdate(req.user.userId, { tradeCount: tradeIndex });
+    const leader = await User.findByIdAndUpdate(req.user.userId, { $inc: { tradeCount: 1 } }, { new: true });
+    if (!leader) return res.status(404).json({ error: 'Leader not found.' });
+    const tradeIndex = leader.tradeCount;
 
     const tradeData = {
       tradeIndex,
@@ -70,6 +73,7 @@ router.post('/promise', async (req, res) => {
       payloadHash: calculatedHash,
       timestamp: new Date().toISOString(),
     });
+    await TradePromise.create({ promiseId, userId: leader._id, tradeIndex, leaderPublicKey: leader.walletAddress, payloadHash: calculatedHash, payload: tradeData, arkivEntityKey: arkivResult.entityKey, arkivOnChain: arkivResult.onChain });
 
     return res.json({
       success: true,
@@ -134,12 +138,24 @@ router.post('/execute', async (req, res) => {
       burnerAccountAddress,
     };
 
-    const hash = payloadHash || hashTradePayload(tradeData);
-    const executionTxHash = `0xexec_${crypto.randomBytes(24).toString('hex')}`;
+    const executionTxHash = req.body.executionTxHash;
+    const existing = await Trade.findOne({ userId: currentUserId, executionTxHash, receiptsVerified: true });
+    if (existing) return res.json({ success: true, tradeId: existing._id, executionTxHash, status: existing.status });
+    if (!/^0x[0-9a-f]{40}$/i.test(burnerAccountAddress)) return res.status(400).json({ error: 'The actual execution burner address is required.' });
+    const entry = await verifiedTransfer(executionTxHash, USDC, burnerAccountAddress, VAULT);
+    const delivery = await verifiedTransfer(req.body.entryDeliveryTxHash, WETH, VAULT, burnerAccountAddress);
+    if (BigInt(delivery.receipt.blockNumber) < BigInt(entry.receipt.blockNumber)) throw new Error('Position delivery predates entry.');
+    if (entry.amount !== BigInt(Math.round(Number(amount) * 1e6))) throw new Error('USDC transfer does not match the recorded capital.');
+    const entryTime = await blockTimestamp(entry.receipt.blockNumber);
+    const sourceSignal = originalSignalId ? await TradeSignal.findOne({ signalId: originalSignalId, followerId: currentUserId, status: 'ACTIVE' }) : null;
+    if (isCopyTrade && (!sourceSignal || new Date(sourceSignal.expiresAt) < entryTime)) return res.status(400).json({ error: 'An owned signal valid at entry is required to record a copy.' });
+    const sealed = !isCopyTrade ? await TradePromise.findOne({ promiseId, userId: currentUserId }) : null;
+    if (sealed && sealed.payloadHash !== hashTradePayload(tradeData)) return res.status(400).json({ error: 'Execution parameters do not match the sealed promise.' });
+    const hash = isCopyTrade ? sourceSignal.tradePayload.payloadHash : (sealed?.payloadHash || payloadHash || hashTradePayload(tradeData));
     const executionPrice = Number(limit);
 
     // Save Trade record to MongoDB
-    const trade = await Trade.create({
+    const entryRecord = {
       userId: currentUserId,
       isCopyTrade: Boolean(isCopyTrade),
       tradeIndex: Number(tradeIndex || 1),
@@ -152,11 +168,24 @@ router.post('/execute', async (req, res) => {
       target: tradeData.target,
       burnerAccountAddress: tradeData.burnerAccountAddress,
       payloadHash: hash,
-      promiseId: promiseId || `prm_direct_${Date.now()}`,
+      promiseId: sealed?.promiseId || sourceSignal?.tradePayload?.promiseId || promiseId,
+      promisePayload: sealed?.payload || sourceSignal?.tradePayload || (!isCopyTrade ? tradeData : undefined),
+      promiseLeaderAddress: sealed?.leaderPublicKey || sourceSignal?.leaderPublicKey || (await User.findById(currentUserId))?.walletAddress,
+      promiseEntityKey: sealed?.arkivEntityKey,
+      leaderId: sourceSignal?.leaderId,
+      originalSignalId,
+      entryDeliveryTxHash: req.body.entryDeliveryTxHash,
+      entryUsdcUnits: entry.amount.toString(),
+      wethUnits: delivery.amount.toString(),
+      entryGasWei: entry.gasWei,
+      entryBlockTimestamp: entryTime,
+      receiptsVerified: true,
       status: 'EXECUTED',
       executionPrice,
       executionTxHash,
-    });
+    };
+    const legacy = !isCopyTrade && promiseId ? await Trade.findOne({ userId: currentUserId, promiseId, receiptsVerified: { $ne: true } }) : null;
+    const trade = legacy ? await Trade.findByIdAndUpdate(legacy._id, { $set: entryRecord }, { new: true }) : await Trade.create(entryRecord);
 
     // If this execution came from a follower copying a signal, mark signal as executed
     if (originalSignalId) {
@@ -235,6 +264,7 @@ router.post('/signal', async (req, res) => {
       burnerAccountAddress,
       payloadHash: payloadHash || hashTradePayload({ tradeIndex: effectiveTradeIndex, symbol, side, orderType, limit, amount, stopLoss, target, burnerAccountAddress }),
       leaderUsername: leader.username || null,
+      promiseId: req.body.promiseId,
       leaderNullifier: leader.nullifierHash,
     };
 
@@ -371,6 +401,33 @@ router.post('/signal', async (req, res) => {
  * GET /api/trades/signals/active (spec.md)
  * Retrieve currently active trade signals for logged-in follower with remaining TTL
  */
+router.post('/signals/:signalId/refresh-encryption', async (req, res) => {
+  try {
+    const { encryptionPublicKey, walletAddress } = req.body;
+    if (typeof encryptionPublicKey !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(encryptionPublicKey) || Buffer.from(encryptionPublicKey, 'base64').length !== 32) {
+      return res.status(400).json({ error: 'A valid MetaMask encryption public key is required.' });
+    }
+    const follower = await User.findById(req.user.userId);
+    if (!follower?.walletAddress || follower.walletAddress.toLowerCase() !== walletAddress?.toLowerCase()) {
+      return res.status(409).json({ error: 'Your linked follower wallet changed. Reopen the signal with its original wallet.' });
+    }
+    const signal = await TradeSignal.findOne({ signalId: req.params.signalId, followerId: req.user.userId, status: 'ACTIVE', expiresAt: { $gt: new Date() } });
+    if (!signal) return res.status(404).json({ error: 'This signal is expired, already executed, or not available to your account.' });
+    if (!signal.requiresMetaMaskDecrypt || signal.followerPublicKey.toLowerCase() !== follower.walletAddress.toLowerCase()) {
+      return res.status(409).json({ error: 'This signal belongs to a different encryption wallet.' });
+    }
+    const payload = signal.tradePayload.toObject ? signal.tradePayload.toObject() : signal.tradePayload;
+    const encrypted = encryptForMetaMask(payload, encryptionPublicKey);
+    const update = await User.updateOne({ _id: follower._id, walletAddress: follower.walletAddress }, { $set: { encryptionPublicKey } });
+    if (!update.matchedCount) return res.status(409).json({ error: 'Your linked wallet changed during key refresh.' });
+    // Refresh only the delivery envelope. Original Arkiv ciphertext/commitment
+    // and signal expiry remain unchanged; no plaintext is returned to the client.
+    const saved = await TradeSignal.updateOne({ _id: signal._id, followerId: req.user.userId, status: 'ACTIVE', expiresAt: { $gt: new Date() } }, { $set: { encryptedPayloadHex: encrypted.encryptedHex } });
+    if (!saved.matchedCount) return res.status(410).json({ error: 'The signal expired during key refresh.' });
+    return res.json({ success: true, encryptedPayloadHex: encrypted.encryptedHex, followerPublicKey: follower.walletAddress, expiresAt: signal.expiresAt });
+  } catch { return res.status(500).json({ error: 'Unable to refresh signal encryption.' }); }
+});
+
 router.get('/signals/active', async (req, res) => {
   try {
     const followerId = req.user.userId;
@@ -429,14 +486,16 @@ router.get('/signals/active', async (req, res) => {
 router.get('/history', async (req, res) => {
   try {
     const userId = req.user.userId;
+    const page = Math.max(0, Math.min(100000, Number.parseInt(req.query.page || '0', 10) || 0));
     const trades = await Trade.find({ userId })
       .sort({ createdAt: -1 })
-      .limit(50)
+      .skip(page * 25).limit(25)
       .lean();
 
     return res.json({
       success: true,
       trades,
+      total: await Trade.countDocuments({ userId }), page,
     });
   } catch (error) {
     console.error('[Trade History] Error:', error.message);
@@ -444,5 +503,48 @@ router.get('/history', async (req, res) => {
   }
 });
 
+router.post('/:tradeId/exit', async (req, res) => {
+  try {
+    const trade = await Trade.findOne({ _id: req.params.tradeId, userId: req.user.userId });
+    if (!trade || !trade.receiptsVerified) return res.status(404).json({ error: 'A receipt-verified trade belonging to your account is required.' });
+    if (trade.status === 'CLOSED') return res.json({ success: true, trade });
+    const { exitType, exitReturnTxHash, exitPayoutTxHash } = req.body;
+    if (!['tp', 'sl'].includes(exitType)) return res.status(400).json({ error: 'Choose bull/take-profit or bear/stop-loss.' });
+    const price = exitType === 'tp' ? trade.target : trade.stopLoss;
+    if (!price || price <= 0) return res.status(400).json({ error: 'The stored exit target is invalid.' });
+    const returned = await verifiedTransfer(exitReturnTxHash, WETH, trade.burnerAccountAddress, VAULT);
+    const payout = await verifiedTransfer(exitPayoutTxHash, USDC, VAULT, trade.burnerAccountAddress);
+    if (returned.amount !== BigInt(trade.wethUnits) || payout.amount !== exitPayout(trade.entryUsdcUnits, trade.wethUnits, price)) throw new Error('Exit transfers do not match this position and scenario payout.');
+    if (BigInt(payout.receipt.blockNumber) < BigInt(returned.receipt.blockNumber)) throw new Error('Exit payout predates the position return.');
+    const closed = await Trade.findOneAndUpdate({ _id: trade._id, userId: req.user.userId, status: 'EXECUTED' }, { $set: { status: 'CLOSED', exitType, exitPrice: price, exitReturnTxHash, exitPayoutTxHash, exitUsdcUnits: payout.amount.toString(), realizedPnlUnits: (payout.amount - BigInt(trade.entryUsdcUnits)).toString(), exitGasWei: returned.gasWei, closedAt: await blockTimestamp(payout.receipt.blockNumber) } }, { new: true });
+    return res.json({ success: true, trade: closed || await Trade.findById(trade._id) });
+  } catch (error) { return res.status(400).json({ error: error.message || 'Exit recording failed; keep both receipt hashes and retry.' }); }
+});
+router.get('/claims/status', async (req, res) => {
+  try {
+    const ids = typeof req.query.ids === 'string' ? req.query.ids.split(',').filter(id => /^[0-9a-f]{24}$/i.test(id)).slice(0, 50) : [];
+    const trades = await Trade.find({ userId: req.user.userId, ...(ids.length ? { _id: { $in: ids } } : {}) }).sort({ createdAt: -1 }).limit(50).lean();
+    const claims = await readResultClaims(req.user.userId, undefined, trades.map(trade => trade._id));
+    return res.json({ success: true, statuses: Object.fromEntries(trades.map(trade => [String(trade._id), matchingClaim(trade, claims)?.entityKey || null])) });
+  } catch { return res.status(503).json({ error: 'Arkiv claim status is unavailable. Unknown does not mean unclaimed; retry verification.' }); }
+});
+router.post('/:tradeId/claim', async (req, res) => {
+  try {
+    const trade = await Trade.findOne({ _id: req.params.tradeId, userId: req.user.userId });
+    if (!trade) return res.status(404).json({ error: 'Trade not found.' });
+    const claim = await claimTradeResult(trade);
+    trade.claimEntityKey = claim.entityKey;
+    if (claim.txHash) trade.claimTxHash = claim.txHash;
+    await trade.save();
+    return res.json({ success: true, ...claim });
+  } catch (error) { return res.status(400).json({ error: error.message || 'Claim verification/write failed. Refresh Arkiv status before retrying.' }); }
+});
+router.get('/:tradeId', async (req, res) => {
+  try {
+    const trade = await Trade.findOne({ _id: req.params.tradeId, userId: req.user.userId });
+    if (!trade) return res.status(404).json({ error: 'Trade not found.' });
+    return res.json({ success: true, trade });
+  } catch { return res.status(400).json({ error: 'Invalid trade identifier.' }); }
+});
 export default router;
 

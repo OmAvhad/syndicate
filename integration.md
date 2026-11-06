@@ -1,5 +1,9 @@
 # Syndicate integration progress and next steps
 
+## History, exits and claims update — 7 November 2026
+
+Leader bear exits, a persistent follower success dialog with both exits, and `/history` for both roles are implemented. New records verify actual entry/exit transfers and show realized USDC P/L separately from native gas. `Claim Promise` verifies the original Arkiv commitment and publishes/reuses a post-trade result claim; claimed status is read from Arkiv, with unknown states blocked. Earlier Markdown described commitments but no claim-state protocol, so `trade_result_claims` is new. See [TRADE_HISTORY.md](TRADE_HISTORY.md) for behavior and legacy-data limitations.
+
 ## Proving-file preparation update — 7 November 2026
 
 The app now self-hosts a fixed, integrity-verified proving-file revision. `/trade` requires explicit preparation of its 75 files (about 179 MiB) in versioned browser Cache Storage before new funding can start. SDK artifact requests read only from that cache during proving; missing files stop the flow rather than triggering GitHub downloads. Build setup downloads/verifies the ignored static files and copies them into the production bundle. Public files are shared per browser origin; wallet keys and notes remain in their existing isolated stores.

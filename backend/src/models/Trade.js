@@ -74,7 +74,7 @@ const tradeSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['PROMISED', 'EXECUTED', 'CANCELLED', 'FAILED'],
+      enum: ['PROMISED', 'EXECUTED', 'CLOSED', 'CANCELLED', 'FAILED'],
       default: 'PROMISED',
       index: true,
     },
@@ -84,9 +84,32 @@ const tradeSchema = new mongoose.Schema(
     executionTxHash: {
       type: String,
     },
+    entryDeliveryTxHash: String,
+    entryUsdcUnits: String,
+    wethUnits: String,
+    entryGasWei: String,
+    entryBlockTimestamp: Date,
+    receiptsVerified: { type: Boolean, default: false },
+    originalSignalId: { type: String, index: true },
+    promisePayload: mongoose.Schema.Types.Mixed,
+    promiseLeaderAddress: String,
+    promiseEntityKey: String,
+    exitType: { type: String, enum: ['tp', 'sl'] },
+    exitPrice: Number,
+    exitReturnTxHash: String,
+    exitPayoutTxHash: String,
+    exitUsdcUnits: String,
+    realizedPnlUnits: String,
+    exitGasWei: String,
+    closedAt: Date,
+    claimEntityKey: String,
+    claimTxHash: String,
   },
   { timestamps: true }
 );
+tradeSchema.index({ userId: 1, executionTxHash: 1 }, { unique: true, partialFilterExpression: { receiptsVerified: true } });
+tradeSchema.index({ userId: 1, entryDeliveryTxHash: 1 }, { unique: true, partialFilterExpression: { receiptsVerified: true } });
+tradeSchema.index({ userId: 1, exitPayoutTxHash: 1 }, { unique: true, partialFilterExpression: { receiptsVerified: true, status: 'CLOSED' } });
 
 const Trade = mongoose.model('Trade', tradeSchema);
 export default Trade;

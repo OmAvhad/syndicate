@@ -18,6 +18,7 @@ export interface TradingBurner {
   signedOperation?: SignedUserOperation; userOpHash?: Hex; fundingTxHash?: Hex
   promise?: { promiseId: string; payloadHash: string; tradeIndex: number; arkivEntityKey?: string }
   entry?: import('../flashEngine').OnchainExecutionResult
+  tradeId?: string
 }
 export function loadTradingBurner(scope: PoolScope): TradingBurner | null {
   const value = localStorage.getItem(`${scopeKey(scope)}:active-trade`)

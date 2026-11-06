@@ -76,6 +76,7 @@ export default function Navbar() {
             <span>Trade Terminal</span>
           </Link>
 
+          <Link to="/history" className="text-xs font-semibold text-text-secondary hover:text-text-primary px-3 py-1.5">History & P/L</Link>
           <Link
             to="/flash-trade"
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
