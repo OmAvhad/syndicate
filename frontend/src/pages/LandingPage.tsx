@@ -1,7 +1,9 @@
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import WorldIDButton from '@/components/WorldIDButton'
 import ThemeToggle from '@/components/ThemeToggle'
-import { ShieldCheck, Fingerprint, Lock, Cpu, EyeOff, KeyRound, Check } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { ShieldCheck, Fingerprint, Lock, Cpu, EyeOff, KeyRound, Check, Zap, ArrowRight } from 'lucide-react'
 
 export default function LandingPage() {
   const { login } = useAuth()
@@ -79,6 +81,12 @@ export default function LandingPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link to="/flash-trade">
+              <Button size="sm" className="h-8 px-3 text-xs gap-1.5 shadow-[0_0_12px_rgba(198,243,106,0.25)]">
+                <Zap className="w-3.5 h-3.5 fill-text-inverse" />
+                Flash Trade Demo
+              </Button>
+            </Link>
             <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-pill bg-surface border border-border text-xs text-text-secondary">
               <span className="w-1.5 h-1.5 rounded-full bg-semantic-success shadow-[0_0_8px_rgba(121,217,154,0.6)]" />
               <span>World ID 4.0 Active</span>
@@ -108,9 +116,18 @@ export default function LandingPage() {
             without revealing your real-world identity, email, or credentials to anyone.
           </p>
 
-          {/* CTA with WorldIDButton */}
+          {/* CTA with WorldIDButton and Flash Trade link */}
           <div className="flex flex-col items-center gap-4">
-            <WorldIDButton onVerified={handleVerified} size="lg" />
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
+              <WorldIDButton onVerified={handleVerified} size="lg" />
+              <Link to="/flash-trade">
+                <Button variant="secondary" size="lg" className="border-accent/40 text-accent hover:border-accent gap-2 h-[52px]">
+                  <Zap className="w-4 h-4 fill-accent" />
+                  Flash Trade Demo (No Login)
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </Link>
+            </div>
             <div className="flex items-center gap-6 text-xs text-text-muted mt-2">
               <span className="flex items-center gap-1.5">
                 <Check className="w-3.5 h-3.5 text-accent" /> Sybil resistant

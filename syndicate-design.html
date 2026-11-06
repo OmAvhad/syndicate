@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SyndicateCopy: copy a trader’s moves without broadcasting them</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF1F4; --surface:#FFFFFF; --ink:#17222E; --muted:#56677A;
+  --line:#C9D2DB; --seal:#A8322D; --sealsoft:#F6E3E1; --follow:#2E6B5E; --followsoft:#DDEDE8;
+  --code:#E3E8ED;
+  color-scheme: light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#121A23; --surface:#1A2531; --ink:#E7EDF2; --muted:#9AABBB;
+    --line:#2E3C4B; --seal:#E0675F; --sealsoft:#3A2224; --follow:#5DB8A2; --followsoft:#1D3530;
+    --code:#22303E; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#121A23; --surface:#1A2531; --ink:#E7EDF2; --muted:#9AABBB;
+  --line:#2E3C4B; --seal:#E0675F; --sealsoft:#3A2224; --follow:#5DB8A2; --followsoft:#1D3530;
+  --code:#22303E; color-scheme: dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  font-size:1.0625rem; line-height:1.6;
+}
+h1,h2,h3{font-family:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; line-height:1.15; margin:0}
+p{margin:0 0 1em}
+.wrap{max-width:1180px; margin:0 auto; padding:0 1.25rem}
+.measure{max-width:64ch}
+code,.addr{font-family:ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:.86em; background:var(--code); padding:.08em .35em; border-radius:4px; word-break:break-all}
+pre{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.85rem; background:var(--code); padding:.7rem .85rem; border-radius:8px; overflow-x:auto; margin:.5rem 0 .75rem}
+
+/* Hero */
+header.hero{padding:4.5rem 0 2.5rem}
+.hero h1{font-size:clamp(2.4rem, 6vw, 4.4rem); font-weight:800; letter-spacing:-.02em; max-width:15ch}
+.hero .sub{font-size:1.25rem; color:var(--muted); margin-top:1.25rem; max-width:54ch}
+.name{font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:1.05rem; margin-bottom:1.5rem; display:flex; align-items:center; gap:.5rem}
+.name .dot{width:.8rem;height:.8rem;border-radius:50%;background:var(--seal);display:inline-block}
+
+/* Viewer demo */
+.viewer{background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:1.5rem; margin:1rem 0}
+.viewer h2{font-size:1.5rem; margin-bottom:.4rem}
+.viewer .lead{color:var(--muted); margin-bottom:1.25rem}
+.tabs{display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.25rem}
+.tabs button{
+  font:inherit; font-weight:700; cursor:pointer; padding:.6rem 1rem; border-radius:999px;
+  border:1.5px solid var(--line); background:transparent; color:var(--ink);
+}
+.tabs button[aria-selected="true"]{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+button:focus-visible, a:focus-visible, summary:focus-visible{outline:3px solid var(--seal); outline-offset:2px}
+.slip{display:grid; grid-template-columns:1fr; gap:1rem}
+@media (min-width:760px){ .slip{grid-template-columns:1.1fr .9fr} }
+.card{border-radius:14px; padding:1.25rem; border:1.5px solid var(--line)}
+.card.signal{min-height:240px}
+.card.signal.open{border-color:var(--follow); background:var(--followsoft)}
+.card.signal.sealed{border-color:var(--seal); background:var(--sealsoft)}
+.card h3{font-size:1.1rem; margin-bottom:.75rem}
+.trade{font-family:"Bricolage Grotesque",sans-serif; font-size:clamp(1.6rem,4vw,2.2rem); font-weight:800; margin-bottom:.5rem}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:.25rem 1rem; font-size:.98rem}
+.kv dt{color:var(--muted)} .kv dd{margin:0; font-weight:700; min-width:0}
+.cipher{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.88rem; line-height:1.5; word-break:break-all; color:var(--seal)}
+.verdict{margin-top:1rem; font-weight:700}
+.side p{margin-bottom:.6rem}
+@media (prefers-reduced-motion:no-preference){
+  .card.signal .reveal{animation:fadein .35s ease}
+  @keyframes fadein{from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none}}
+}
+
+/* Sections */
+section{padding:3rem 0; border-top:1px solid var(--line)}
+section h2{font-size:clamp(1.7rem,3.5vw,2.4rem); margin-bottom:1rem; letter-spacing:-.01em}
+.problem{display:grid; gap:1.25rem; grid-template-columns:1fr}
+@media (min-width:760px){ .problem{grid-template-columns:repeat(3,1fr)} }
+.problem div{padding-top:.75rem; border-top:3px solid var(--seal)}
+.problem h3{font-size:1.15rem; margin-bottom:.4rem}
+.problem p{color:var(--muted); font-size:1rem}
+
+.fixes{display:grid; gap:1rem 2rem; grid-template-columns:1fr}
+@media (min-width:760px){ .fixes{grid-template-columns:1fr 1fr} }
+.fixes p{margin:0}
+
+.tablewrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface)}
+table{width:100%; border-collapse:collapse; font-size:.97rem}
+th,td{text-align:left; padding:.7rem .9rem; border-bottom:1px solid var(--line); vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-family:"Bricolage Grotesque",sans-serif; font-weight:700}
+.no{color:var(--follow); font-weight:700}
+
+/* Timeline with per-step questions */
+ol.timeline{list-style:none; padding:0; margin:0; counter-reset:step}
+ol.timeline > li{counter-increment:step; display:grid; grid-template-columns:3.2rem minmax(0,1fr); gap:1rem 1.5rem; padding:1.5rem 0; border-bottom:1px dashed var(--line)}
+ol.timeline > li:last-child{border-bottom:0}
+ol.timeline > li::before{
+  content:counter(step); font-family:"Bricolage Grotesque",sans-serif; font-weight:800; font-size:1.3rem;
+  width:2.6rem; height:2.6rem; border-radius:50%; display:grid; place-items:center;
+  border:2px solid var(--ink); grid-row:1 / span 2;
+}
+ol.timeline .qs{grid-column:2}
+@media (min-width:900px){
+  ol.timeline > li{grid-template-columns:3.2rem minmax(0,1.05fr) minmax(0,.95fr)}
+  ol.timeline > li::before{grid-row:1}
+  ol.timeline .qs{grid-column:3; grid-row:1}
+}
+ol.timeline h3{font-size:1.15rem; margin-bottom:.3rem}
+ol.timeline .when{color:var(--muted); font-size:.92rem; display:block; margin-bottom:.2rem}
+ol.timeline p{margin-bottom:.4rem}
+.public{font-size:.95rem; color:var(--muted)}
+.public strong{color:var(--ink)}
+
+.spon{border-left:3px solid var(--line); padding:.35rem 0 .35rem .8rem; margin:.5rem 0 .75rem; display:flex; flex-direction:column; gap:.35rem}
+.spon .sl{font-size:.95rem; line-height:1.45}
+.chip{display:inline-flex; align-items:center; gap:.4rem; font-weight:700; font-size:.85rem; padding:.12rem .6rem; border:1.5px solid var(--line); border-radius:999px; background:var(--surface); margin-right:.45rem; white-space:nowrap}
+.chip i{width:.6rem; height:.6rem; border-radius:50%; background:var(--d); display:inline-block}
+.c-def{--d:#E2622B} .c-ark{--d:#8B5CF6} .c-ef{--d:#3B82F6} .c-world{--d:#EC4899}
+.legend{display:grid; gap:.5rem; grid-template-columns:1fr; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:1rem 1.25rem; margin:0 0 1rem}
+@media (min-width:760px){ .legend{grid-template-columns:1fr 1fr} }
+.legend div{font-size:.95rem}
+.qs{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:.35rem 1rem; align-self:start}
+.qs .qhead{font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:.95rem; color:var(--muted); padding:.55rem 0 .2rem}
+.qs details{border-top:1px solid var(--line); padding:.65rem 0}
+.qs details:first-of-type{border-top:0}
+.qs summary{cursor:pointer; font-weight:700; line-height:1.4; font-size:.98rem}
+.qs details[open] summary{color:var(--follow)}
+.qs details p, .qs details ul{margin:.5rem 0 0; font-size:.95rem}
+.qs details ul{padding-left:1.1rem}
+.qs details li{margin-bottom:.3rem}
+
+.prizes{display:grid; gap:1rem; grid-template-columns:1fr; margin-top:1.25rem}
+@media (min-width:900px){ .prizes{grid-template-columns:repeat(3,1fr)} }
+.prize{background:var(--surface); border:1.5px solid var(--line); border-radius:16px; padding:1.25rem; display:flex; flex-direction:column; gap:.6rem}
+.prize .who{font-family:"Bricolage Grotesque",sans-serif; font-weight:800; font-size:1.25rem}
+.prize .track{font-weight:700; line-height:1.35}
+.prize .amt{font-family:"Bricolage Grotesque",sans-serif; font-weight:800; font-size:1.6rem; color:var(--follow)}
+.prize .amt small{font-family:"Atkinson Hyperlegible",sans-serif; font-weight:400; font-size:.9rem; color:var(--muted); display:block}
+.prize h4{font-family:"Bricolage Grotesque",sans-serif; font-size:.95rem; margin:.4rem 0 0; color:var(--muted)}
+.prize p{margin:0; font-size:.97rem}
+.prize ul{margin:0; padding-left:1.1rem; font-size:.95rem}
+.prize li{margin-bottom:.3rem}
+.rules{background:var(--followsoft); border-radius:12px; padding:1rem 1.25rem; margin-top:1rem}
+.rules p{margin:0 0 .4rem} .rules p:last-child{margin:0}
+.alt{margin-top:1.5rem}
+.alt h3{font-size:1.2rem; margin-bottom:.6rem}
+.general{display:grid; gap:1rem; grid-template-columns:1fr}
+@media (min-width:760px){ .general{grid-template-columns:1fr 1fr} }
+.general .qs{padding:.35rem 1rem .5rem}
+
+.money{display:grid; gap:1rem; grid-template-columns:1fr}
+@media (min-width:760px){ .money{grid-template-columns:1fr 1fr} }
+.money .card{background:var(--surface)}
+.money .big{font-family:"Bricolage Grotesque",sans-serif; font-weight:800; font-size:2rem}
+.money ul{padding-left:1.1rem; margin:.5rem 0 0}
+
+.honest{display:grid; gap:1.5rem; grid-template-columns:1fr}
+@media (min-width:760px){ .honest{grid-template-columns:1fr 1fr 1fr} }
+.honest h3{font-size:1.1rem; margin-bottom:.5rem}
+.honest ul{margin:0; padding-left:1.1rem}
+.honest li{margin-bottom:.4rem}
+
+blockquote.line{font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:clamp(1.3rem,3vw,1.8rem); margin:0 0 1rem; padding-left:1rem; border-left:4px solid var(--seal); max-width:34ch}
+footer{padding:2rem 0 3rem; color:var(--muted); font-size:.92rem; border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<header class="hero wrap">
+  <div class="name"><span class="dot" aria-hidden="true"></span>SyndicateCopy</div>
+  <h1>Follow a great trader without telling the whole internet.</h1>
+  <p class="sub">Copy trading today has a leak: everyone can see the leader’s wallet, so anyone can copy for free and bots can trade ahead. SyndicateCopy seals each trade signal so only verified, paying followers can open it, and trades come from wallets nobody can trace to the leader.</p>
+</header>
+
+<main>
+<div class="wrap">
+  <div class="viewer" id="demo">
+    <h2>One signal, three people</h2>
+    <p class="lead">Priya just bought ETH. Pick a person to see what they get.</p>
+    <div class="tabs" role="tablist" aria-label="Choose a viewer">
+      <button role="tab" id="tab-priya" aria-selected="false" aria-controls="panel" data-who="priya">Priya, the trader</button>
+      <button role="tab" id="tab-arjun" aria-selected="true" aria-controls="panel" data-who="arjun">Arjun, a follower</button>
+      <button role="tab" id="tab-ravi" aria-selected="false" aria-controls="panel" data-who="ravi">Ravi, an outsider</button>
+    </div>
+    <div class="slip" id="panel" role="tabpanel" aria-live="polite"></div>
+  </div>
+</div>
+
+<section id="prizes">
+  <div class="wrap">
+    <h2>Where this wins prizes</h2>
+    <p class="measure">ETHGlobal Mumbai lets each project pick three partner prizes. SyndicateCopy is a new project (not Continuity Track), so these are the open tracks it fits, with what each sponsor requires.</p>
+    <div class="prizes">
+      <article class="prize">
+        <div class="who">Definitive</div>
+        <div class="track">Best Use of Flash Advanced Orders in a Social App</div>
+        <div class="amt">$2,500<small>one winner</small></div>
+        <h4>Why it fits</h4>
+        <p>Copy trading on Flash is the first idea the track lists. Every trade, the bracket orders, the follower order-splitting and the per-trade fee all run through Flash.</p>
+        <h4>Must show</h4>
+        <ul>
+          <li>A working flow using Flash advanced orders (we use Bracket and TWAP)</li>
+          <li>Onchain execution in the final demo</li>
+          <li>A short demo video posted on both Discord and X, tagging @DefinitiveFi</li>
+        </ul>
+      </article>
+      <article class="prize">
+        <div class="who">Arkiv</div>
+        <div class="track">Build on Arkiv (from scratch)</div>
+        <div class="amt">$4,000<small>1st $3,000, 2nd $1,000</small></div>
+        <h4>Why it fits</h4>
+        <p>Signals are shared state that expire at a deadline, queried by rotating tags we designed for privacy. Sealed promises and reveals are records any app can read and check.</p>
+        <h4>Must show</h4>
+        <ul>
+          <li>Writes to Arkiv testnet with the SDK, and the follower app reads signals from Arkiv</li>
+          <li>README with the writing wallet address and one runnable query</li>
+          <li><code>/arkiv/schema.md</code>, <code>friction.md</code>, <code>reach.md</code>, <code>why-arkiv.md</code>, <code>how-you-use-arkiv.md</code> (judged 25% each on feedback, reach, why Arkiv, how you use it)</li>
+        </ul>
+      </article>
+      <article class="prize">
+        <div class="who">Ethereum Foundation</div>
+        <div class="track">Best CROPS App</div>
+        <div class="amt">$3,500<small>1st $2,000, 2nd $1,000, 3rd $500</small></div>
+        <h4>Why it fits</h4>
+        <p>Privacy is the reason the product exists: our server only ever handles ciphertext, and trades can’t be traced to the trader. Built with Kohaku, the EF’s privacy SDK.</p>
+        <h4>Must show</h4>
+        <ul>
+          <li>Open-source license and a README a judge can run from</li>
+          <li>A README section titled CROPS, one or two lines each for C, O, P and S</li>
+          <li>A demo video under 3 minutes showing the moment privacy matters, such as Ravi’s view or server logs with only ciphertext</li>
+          <li>No trackers or analytics; keys stay on the user’s device</li>
+        </ul>
+      </article>
+    </div>
+    <div class="rules">
+      <p><strong>Best case:</strong> first place in all three is $7,500.</p>
+      <p><strong>Rules to remember:</strong> three partner picks per project; at most one EF prize per project (EF judges decide which); one Arkiv track prize per team.</p>
+    </div>
+
+    <div class="alt">
+      <h3>Other options for the third pick</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Track</th><th>Prize</th><th>How SyndicateCopy would fit</th></tr></thead>
+          <tbody>
+            <tr><td>World: World ID Agent Pass</td><td>$5,000 (1st $2,500)</td><td>A fresh human verification before a leader publishes signals or a follower copies a large trade. Must show success and denied paths, backend validation, and a short integration debrief. A safer pick if Kohaku proves too risky.</td></tr>
+            <tr><td>World: Best Use of IDKit</td><td>$2,500 (up to 2 teams, $1,250 each)</td><td>One human, one seat: fair access to a scarce benefit. Must explain why Proof of Human is the minimum assurance needed.</td></tr>
+            <tr><td>EF: Best Use of Anon-RPC</td><td>$5,000 (1st $2,500)</td><td>If the follower app routes all its chain reads through Anon-RPC by default. Uses the same EF slot as CROPS.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="measure" style="margin-top:1rem; color:var(--muted)">We still use World ID even if World isn’t one of our three picks. Hedera, Whitechain, 1inch Aqua, 0G, ENS and Chainlink would be stretches: their tracks target agent payments, merchant payments, liquidity positions, AI apps, naming or oracles. Uniswap’s broad track would compete with Flash as our trade executor.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What’s broken today</h2>
+    <div class="problem">
+      <div><h3>Leaders get copied for free</h3><p>A good trader’s wallet is public. Tools watch it and copy every move, so they can’t earn from their skill.</p></div>
+      <div><h3>Bots trade ahead</h3><p>Big followings mean big predictable buys. Bots jump in first, and followers pay higher prices.</p></div>
+      <div><h3>Leaderboards are faked</h3><p>One person runs many wallets, shows only the winners, and looks like a genius.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The fix, one idea at a time</h2>
+    <div class="fixes measure" style="max-width:none">
+      <p><strong>Sealed signals.</strong> Each signal is encrypted with a room key that only followers hold (or per-message hybrid keys), then stored on Arkiv for 10 minutes. Anyone can download it; only active, paying followers can open it.</p>
+      <p><strong>Signed by the trader.</strong> Priya signs every signal with her own profile key, so followers know it’s really her, even if our server is compromised.</p>
+      <p><strong>Tags that change every time.</strong> Signals aren’t filed under a fixed room name. Each gets a new tag that only followers can compute, so outsiders can’t even tell which signals belong to the same room.</p>
+      <p><strong>One shared poster.</strong> Our server posts every room’s signals from one wallet. It only ever sees ciphertext, so it can’t read or forge anything. If it goes down, Priya’s app can post directly.</p>
+      <p><strong>One human, one seat.</strong> World ID proves each trader and follower is a unique real person, so nobody can fake a record with fifty wallets.</p>
+      <p><strong>Untraceable trading wallets.</strong> Priya’s money sits in a private pool (Railgun, through the EF’s Kohaku SDK). Each trade uses a fresh single-use wallet that nobody can trace to the leader.</p>
+      <p><strong>Followers protected by default.</strong> Copies are spread out: a random short delay, then each order split into smaller pieces over a few minutes. That blurs the burst of buys that would reveal a signal and gives bots less to jump ahead of.</p>
+      <p><strong>Private mode for followers, opt-in.</strong> Followers who want it keep their money in the same private pool and copy from fresh burners, just like the leader. Best for larger amounts, since relayer fees are fixed.</p>
+      <p><strong>Real execution, built-in fees.</strong> Trades run through Definitive Flash, with a small fee on every copied trade split between the leader and the platform.</p>
+      <p><strong>A record nobody can edit.</strong> Before each trade, Priya posts a sealed, numbered promise. After it closes, she opens it and anyone can check her real result.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The cast</h2>
+    <p class="measure">All addresses and keys here are made-up examples.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Who or what</th><th>Example</th><th>Can the public link it to its owner?</th></tr></thead>
+        <tbody>
+          <tr><td>Priya’s fresh funding wallet</td><td><span class="addr">0xA1A1…F001</span></td><td class="no">No</td></tr>
+          <tr><td>Priya’s private pool address</td><td><span class="addr">0zk1q9…priya</span></td><td class="no">No, it’s private</td></tr>
+          <tr><td>Priya’s World ID for this app</td><td><span class="addr">0x1F3C…77AB</span></td><td class="no">No, it only proves “unique human”</td></tr>
+          <tr><td>Priya’s profile key (signs signals)</td><td><span class="addr">PK_priya</span></td><td>Bound to her World ID, not to any wallet</td></tr>
+          <tr><td>Priya’s public profile</td><td>“Priya’s ETH Swings”</td><td class="no">A name and stats, no wallet</td></tr>
+          <tr><td>Burner wallet for trade #17</td><td><span class="addr">0xB2B2…E002</span></td><td class="no">Not until she reveals it after the trade closes</td></tr>
+          <tr><td>Private-pool relayer</td><td><span class="addr">0xRE1A…0003</span></td><td class="no">No, shared by many users</td></tr>
+          <tr><td>Platform’s shared posting wallet</td><td><span class="addr">0xPOST…0007</span></td><td class="no">No, it posts for every room</td></tr>
+          <tr><td>Arjun’s trading wallet (default mode)</td><td><span class="addr">0xC3C3…A004</span></td><td>Yes, it’s his normal wallet, but his copies are spread out in time</td></tr>
+          <tr><td>Arjun’s encryption public key</td><td><span class="addr">PUB_ENC_arjun</span></td><td>Published on Arkiv alongside membership record</td></tr>
+          <tr><td>Arjun’s burner (private mode only)</td><td><span class="addr">0xD5D5…F008</span></td><td class="no">No, funded from the private pool like Priya’s</td></tr>
+          <tr><td>Platform fee wallet</td><td><span class="addr">0xFEE5…0005</span></td><td>Public company wallet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="story">
+  <div class="wrap">
+    <h2>One trade, start to finish</h2>
+    <p class="measure">Each step shows what happens, which sponsor does the work, what the public sees, and the questions people tend to ask right there.</p>
+    <div class="legend" aria-label="Where each sponsor appears">
+      <div><span class="chip c-def"><i></i>Definitive Flash</span>Steps 5, 7, 9: executes every trade and attaches fees</div>
+      <div><span class="chip c-ark"><i></i>Arkiv</span>Steps 2, 3, 6, 7, 8, 10: membership indexing, sealed promises, signals, expiry, reveals</div>
+      <div><span class="chip c-ef"><i></i>EF Kohaku</span>Steps 1, 4, 7, 9: private pool, relayer, burners</div>
+      <div><span class="chip c-world"><i></i>World ID</span>Step 2: one human, one profile, one seat</div>
+    </div>
+    <ol class="timeline">
+      <li>
+        <div>
+          <span class="when">A few days before</span>
+          <h3>Priya funds a private balance</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ef"><i></i>EF Kohaku</span>Shields her USDC into the Railgun pool, turning it into private notes only she can spend.</div></div>
+          <p>She withdraws 10,000 USDC from her exchange to a brand-new wallet <span class="addr">0xA1A1…F001</span> and deposits it into the private pool. She never uses that wallet again.</p><p class="public"><strong>Public sees:</strong> a new wallet deposited into the pool, like thousands of others.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>Can we hide that Priya uses the private pool at all?</summary><p>Not fully: the first deposit is always public. But it comes from a fresh wallet funded straight from her exchange, so nothing links it to her. More importantly, her profile shows no wallet, so there’s nothing to watch in the first place.</p></details><details><summary>Why not deposit from her main wallet?</summary><p>That one public deposit would link her identity to the pool, and anyone could watch for her later withdrawals. A fresh, exchange-funded wallet avoids that link.</p></details><details><summary>Does SyndicateCopy ever hold her money?</summary><p>No. Only Priya’s keys can spend her notes in the pool, followers trade from their own wallets, and Flash executes orders without taking custody.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Sign-up & Subscription</span>
+          <h3>Priya and Arjun verify; Arjun pays subscription & writes to Arkiv</h3>
+          <div class="spon"><div class="sl"><span class="chip c-world"><i></i>World ID</span>Proves each is a unique human without revealing who, blocks second accounts, and anchors Priya’s profile key.</div><div class="sl"><span class="chip c-ark"><i></i>Arkiv</span>Stores 30-day auto-expiring membership entity containing Arjun's public key & payment proof.</div></div>
+          <p>Both scan World ID. Priya’s app creates her profile key <span class="addr">PK_priya</span> and binds it to her World ID. Arjun takes one seat, pays the monthly 20 USDC subscription directly to Priya's wallet on-chain, capturing <span class="addr">paymentTxHash</span>.</p>
+          <p>Arjun’s phone receives/generates his encryption keypair (<span class="addr">PUB_ENC_arjun</span> / <span class="addr">PRIV_ENC_arjun</span>) and publishes a `Membership` entity directly to Arkiv set to auto-expire in 30 days:</p>
+          <pre>createEntity({
+  schema: MembershipSchema,
+  attributes: { leader: PK_priya, follower: account.address },
+  payload: { pubKey: PUB_ENC_arjun, txHash: paymentTxHash },
+  expiresIn: ExpirationTime.fromDays(30)
+})</pre>
+          <p class="public"><strong>Public sees:</strong> a paid transaction on-chain, and an entity on Arkiv indexed under Priya's leader address that automatically expires off state in 30 days. No names or private keys.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>What stops Priya from opening a second account?</summary><p>World ID gives the same ID for the same person in this app. A second sign-up shows the same ID and is rejected, so nobody can fake a record with many accounts.</p></details><details><summary>How does Arjun pay and prove his membership?</summary><p>He sends native tokens or USDC to the leader wallet, getting a `txHash`. His frontend then writes a `Membership` entity to Arkiv containing his public encryption key and `txHash`. Arkiv's built-in 30-day block expiration automatically revokes his active status when the month ends.</p></details><details><summary>What if someone writes a fake membership entity to Arkiv?</summary><p>Priya's client checks that the `paymentTxHash` in the Arkiv entity corresponds to an actual verified transaction to her wallet on-chain before encrypting signal keys for that user.</p></details><details><summary>How does Arjun get the room key safely?</summary><p>The key is encrypted to his device’s own public key before it’s sent, so only his phone can open it. It’s never posted anywhere readable.</p></details><details><summary>What happens when a follower leaves or expires?</summary><p>When a membership expires after 30 days, Arkiv automatically drops the entity. On the next broadcast, Priya queries active members, excluding expired followers from the key map.</p></details><details><summary>What if Priya loses her phone?</summary><p>Her profile key and pool keys must be backed up, like a wallet’s recovery phrase. Her World ID lets her bind a new profile key to the same identity, so her followers and record stay with her.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 5, 10:00:00</span>
+          <h3>Priya posts a sealed promise</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ark"><i></i>Arkiv</span>Stores the signed promise with a timestamp and no expiry, so her record can be checked later.</div></div>
+          <p>Her app posts a fingerprint to Arkiv, signed with her profile key: “trade #17 will use a wallet I’m not naming yet.” It’s timestamped, so she can’t invent it after the fact.</p><pre>commitment = hash(0xB2B2…E002, trade #17, secret salt)</pre><p class="public"><strong>Public sees:</strong> a random-looking hash.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>How does the system know the burner is Priya’s?</summary><p>No contract needs to know during the trade. This sealed promise, signed with her profile key, commits to the burner in advance. After the trade, she reveals it and anyone can check.</p></details><details><summary>Isn’t that link centralized on your server?</summary><p>No. Her profile key is bound to her World ID, the promise is timestamped on Arkiv, and anyone can verify the reveal. Our server never needs to hold the link.</p></details><details><summary>Can someone work out the burner from the fingerprint?</summary><p>No. The secret salt makes the hash impossible to reverse or guess, even by trying every new wallet on the chain.</p></details><details><summary>Could she claim someone else’s good trade?</summary><p>No. She’d have to have committed to that wallet before it traded, and the reveal requires a fingerprint that matches.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 5, 10:00:05</span>
+          <h3>Money moves to a burner, without her account</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ef"><i></i>EF Kohaku</span>Builds the zero-knowledge proof on her phone and sends it through a relayer, so no account of hers appears.</div></div>
+          <p>Her phone builds a private proof: “I own enough notes in this pool.” A relayer sends it to the pool contract and pays the gas. The pool sends 6,050 USDC to the new burner <span class="addr">0xB2B2…E002</span>, plus 3,940 USDC change back to Priya as a new private note.</p><p class="public"><strong>Public sees:</strong> the relayer called the pool, and the pool paid some new wallet. It could be any user.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>Isn’t this withdrawal sent from Priya’s account?</summary><p>No account of hers sends it. Her private pool address is just keys on her phone, not an on-chain account. The relayer submits the proof, and the contract checks the proof, not the sender.</p></details><details><summary>How does the pool know she has enough money?</summary><p>Her balance is a set of private “notes,” like sealed envelopes. The proof shows the notes exist, she owns them, they haven’t been spent, and inputs equal outputs (10,000 = 6,050 + 10 fee + 3,940 change). Without enough, no valid proof can be made.</p></details><details><summary>Where does the burner get gas money?</summary><p>Through the relayer, or withdrawn from the pool too. Never from a wallet linked to Priya: one such transfer would connect everything.</p></details><details><summary>Can the relayer see who she is?</summary><p>It sees only a proof. It could see the internet address the request came from, so the app routes requests through privacy networks rather than directly.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 5, 10:00:10</span>
+          <h3>The burner buys ETH through Flash</h3>
+          <div class="spon"><div class="sl"><span class="chip c-def"><i></i>Definitive Flash</span>Places one Bracket order (buy, stop-loss, take-profit), finds the best price across many sources, and lands it onchain.</div></div>
+          <p>The burner signs one order: 2 ETH at about $3,000, with a stop-loss at $2,850 and a take-profit at $3,300. Our server forwards it, so Definitive sees the platform, not Priya’s internet address.</p><p class="public"><strong>Public sees:</strong> a brand-new wallet bought 2 ETH.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>Can’t people just watch the blockchain?</summary><p>They can see that someone bought ETH, but the wallet has no history and no link to Priya. Trades are anonymous, not invisible.</p></details><details><summary>Does Definitive learn it’s Priya?</summary><p>No. It sees an order signed by a new wallet, sent from our server.</p></details><details><summary>Why use Flash instead of a plain swap?</summary><p>One order carries the buy, stop-loss and take-profit, Flash finds the best price across many sources, and it lets us attach a fee to every copied trade from day one.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 5, about 10:00:40</span>
+          <h3>Leader fetches active followers, encrypts signal & posts to Arkiv</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ark"><i></i>Arkiv</span>Holds encrypted envelope payload under a rotating HMAC tag with a 10-minute expiry.</div></div>
+          <p>Priya's app queries Arkiv for all active non-expired memberships for <span class="addr">PK_priya</span> and retrieves public encryption keys (<span class="addr">PUB_ENC_arjun</span>, etc.).</p>
+          <p>Her app generates a **fresh random symmetric key** (<span class="addr">AES_K17</span>) for this trade, encrypts the signal details with <span class="addr">AES_K17</span>, encrypts <span class="addr">AES_K17</span> for each follower's public key, and signs with <span class="addr">PK_priya</span>. Our server posts the blob to Arkiv from <span class="addr">0xPOST…0007</span> under rotating tag `HMAC(roomKey, "signal" + 17)` set to expire in 10 minutes (`expiresIn: 600`).</p>
+          <pre>payload = {
+  encryptedSignal: AES_Encrypt("Buy ETH @ $3,000, Stop $2,850, TP $3,300", AES_K17),
+  keys: { "0xC3C3…A004": Encrypt_RSA(AES_K17, PUB_ENC_arjun) },
+  signature: Sign(payload, PK_priya)
+}</pre>
+          <p class="public"><strong>Public sees:</strong> the platform posted an encrypted entry under a random-looking tag. Outsiders cannot read the signal or key mapping.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>If Priya keeps her trade private, what does the signal contain?</summary><p><em>What</em> to trade: buy ETH around $3,000, stop $2,850, target $3,300. Not <em>which wallet</em> did it. Followers need only the first to copy from their own wallets.</p></details><details><summary>How does Priya find who to encrypt for?</summary><p>Her app queries Arkiv for active `Membership` entities tagged with her leader ID. Arkiv returns active followers and their public keys. She encrypts the signal once with a fresh AES key, and encrypts that AES key per active follower's public key.</p></details><details><summary>Why use a new AES key for every message?</summary><p>Per-message key generation ensures perfect forward secrecy and effortless revocation: when a follower's membership expires, they are omitted from the key mapping on future signals.</p></details><details><summary>Who posts it to Arkiv, and how?</summary><p>Priya’s app signs, encrypts and pads it. Our server writes it from one shared wallet used for every room. If our server is down or refuses, her app can post directly.</p><pre>createEntity({ payload: cipher, attributes: { tag, type: "signal" }, expiresIn: 600 })</pre></details><details><summary>Anyone can download the encrypted signal. Is that safe?</summary><ul><li>Yes, as long as only followers hold valid decryption keys for the per-message AES key.</li><li>The key mapping changes on every broadcast.</li><li>We use a standard authenticated cipher (AES-GCM) from a proven library, never a homemade scheme.</li></ul></details><details><summary>What can outsiders still learn without the key?</summary><p>That an entry was posted, and when. Rotating tags, fixed-size padding, a random delay and occasional decoy signals make that close to useless.</p></details><details><summary>Could someone post a fake signal as Priya?</summary><p>No. Followers’ apps check her profile-key signature and reject anything that doesn’t verify, even if our server is hacked.</p></details><details><summary>Why not use a new posting wallet every time?</summary><p>Each new wallet needs gas, and a common funder would link them all. Rotating tags plus one shared posting wallet hide far more, with no gas puzzle.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 5, 10:01</span>
+          <h3>Arjun fetches, decrypts & executes (Default or Private Mode)</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ark"><i></i>Arkiv</span>His app queries the tag it computed and reads the signal.</div><div class="sl"><span class="chip c-def"><i></i>Definitive Flash</span>Executes his copy as a TWAP split and attaches the 0.3% fee.</div><div class="sl"><span class="chip c-ef"><i></i>EF Kohaku</span>Private mode only: transfers from Railgun pool to fresh burner via ZK proof & relayer.</div></div>
+          <p>A push says only “New signal in Priya’s ETH Swings.” His app computes tag #17, fetches the entry from Arkiv, decrypts <span class="addr">AES_K17</span> using <span class="addr">PRIV_ENC_arjun</span>, decrypts the signal, and checks Priya’s signature. He taps Copy with $500 across his chosen path:</p>
+          <p><strong>Path A (Default mode):</strong> the app waits a random 0 to 90 seconds, then Flash splits his order into 3 smaller pieces over about 4 minutes (TWAP) from his wallet <span class="addr">0xC3C3…A004</span>. He ends up with 0.1663 ETH at an average $3,006.</p>
+          <p><strong>Path B (Private mode - opt-in):</strong> his money sits in the private pool. The app uses the **EF Kohaku SDK** to build a ZK proof, withdraws $500 through a relayer to a fresh burner <span class="addr">0xD5D5…F008</span>, and executes the Flash copy anonymously.</p>
+          <p class="public"><strong>Fee:</strong> 0.3% of $500 is $1.50. $1.00 goes to Priya’s private address and $0.50 to the platform.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>How does Arjun find out a signal is waiting?</summary><p>A push notification with no trade details, since pushes pass through Apple’s or Google’s servers. His app then fetches and decrypts the entry from Arkiv. While open, it can also check Arkiv directly.</p></details><details><summary>How does his app find the right entry if the tag keeps changing?</summary><p>It holds the room key, so it computes the next expected tags (#17, #18…) and asks Arkiv for exactly those.</p></details><details><summary>How does Arjun decrypt the signal payload?</summary><p>His app queries Arkiv for tag #17, finds his wallet entry in the `keys` map, decrypts the 32-byte AES key using his private key (`PRIV_ENC_arjun`), and unlocks the trade details with AES-GCM.</p></details><details><summary>How does Private Mode execution work for a follower?</summary><p>It mirrors the leader's flow: Arjun's phone uses the EF Kohaku SDK to generate a zero-knowledge proof of his private pool notes. A relayer submits the withdrawal to a single-use burner wallet (`0xD5D5…F008`), which executes the trade on Flash and vanishes.</p></details><details><summary>Why does he get a slightly worse price?</summary><p>Priya’s buy moved the price a little before he copied. This is slippage. We show it openly, and for big rooms we spread followers’ orders over a few minutes.</p></details><details><summary>Are followers’ trades protected too?</summary><p>Yes, at two levels. By default, copies are spread out with a random delay and split into pieces, so there’s no sudden burst that reveals a signal. In private mode, a follower’s trades come from untraceable burners, just like the leader’s.</p></details><details><summary>Can Ravi just watch Arjun’s wallet and copy him?</summary><p>In default mode he could see Arjun’s buy, but only minutes after Priya’s and spread out, by which time much of the move has happened. In private mode there’s no wallet of Arjun’s to watch. Followers who care about this should use private mode.</p></details><details><summary>Why is private mode opt-in rather than the default?</summary><p>Every private trade pays relayer fees, about $10 in this example. On a $500 copy that’s 2%, which eats most of a typical gain. For larger amounts the fee is small and the privacy is worth it.</p></details><details><summary>Doesn’t spreading his order out cost him?</summary><p>The price can drift either way during those few minutes, and for small orders the effect is tiny. In return, bots have a much harder time jumping ahead of a crowd of followers, which usually saves more than it costs.</p></details><details><summary>What if he reposts the signal publicly?</summary><p>We can’t stop it, but each follower gets slightly different details, so a leaked copy points back to who shared it. Even leaked, it never exposes Priya’s wallet.</p></details><details><summary>Can fees reach Priya without revealing her?</summary><p>Yes. The private pool lets anyone pay her private address directly, so her fee share never touches a public wallet.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 5, about 10:11</span>
+          <h3>The signal disappears</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ark"><i></i>Arkiv</span>Expires the entity automatically; no cleanup job on our side.</div></div>
+          <p>It drops out of Arkiv’s searchable data, so nobody can copy a stale signal at a much worse price.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>What if a follower was offline?</summary><p>They miss that trade, which protects them from buying at a stale price. Their app keeps a history of signals it already opened, and auto-copy mode can trade for them using limited permissions they grant.</p></details><details><summary>Is it really gone?</summary><p>It leaves Arkiv’s searchable data, but an encrypted copy probably stays in chain history. If a key leaked later, only old, finished trades would be exposed, and rotating keys limits how many any one key opens.</p></details><details><summary>Why 10 minutes?</summary><p>Long enough for followers to react, short enough that late copies aren’t chasing a price that has already moved. Rooms could set their own window.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 7</span>
+          <h3>Take-profit hits, and the burner is retired</h3>
+          <div class="spon"><div class="sl"><span class="chip c-def"><i></i>Definitive Flash</span>Triggers the take-profit sell on its own, with nobody online.</div><div class="sl"><span class="chip c-ef"><i></i>EF Kohaku</span>Shields the proceeds back into the pool as a new private note for Priya.</div></div>
+          <p>ETH reaches $3,300 and both orders sell automatically. The burner sends its 6,650 USDC back into the pool as a new private note for Priya, and is never used again.</p><p class="public"><strong>Public sees:</strong> the wallet sold ETH and deposited into the pool.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>Who triggers the sell if nobody is online?</summary><p>Flash holds the stop-loss and take-profit orders and executes them when the price is reached.</p></details><details><summary>Why never reuse the burner?</summary><p>Reuse lets anyone build a history for that wallet and spot it next time. One wallet per trade keeps every trade unlinked.</p></details><details><summary>How does her balance update?</summary><p>The deposit creates a new private note addressed to her. Her app finds it on the next scan, and her total rises to about 10,593 USDC.</p></details></div>
+      </li>
+      <li>
+        <div>
+          <span class="when">Day 7, after the trade closes</span>
+          <h3>Priya opens her sealed promise</h3>
+          <div class="spon"><div class="sl"><span class="chip c-ark"><i></i>Arkiv</span>Stores the reveal next to the promise, so anyone can query both and verify her record.</div></div>
+          <p>She reveals that trade #17 used <span class="addr">0xB2B2…E002</span>, with the salt. Anyone can check the fingerprint matches, that it was posted before the trade, and what the wallet earned.</p><p class="public"><strong>Public sees:</strong> one verified, finished trade on her record.</p>
+        </div>
+        <div class="qs"><div class="qhead">Questions at this step</div><details><summary>Doesn’t revealing the burner expose her?</summary><p>Not usefully: the trade is over and the wallet is retired. Careless patterns across many reveals, like exact amounts or quick withdrawals, could hint at her funding, so the app varies amounts and timing.</p></details><details><summary>What stops her from hiding losing trades?</summary><p>Promises are numbered, so gaps are visible, and any promise not opened within 3 days counts as a maximum loss. Hiding a loss looks worse than showing it.</p></details><details><summary>How can I check her record myself?</summary><p>Recompute the fingerprint from the revealed wallet and salt, compare it with the timestamped promise on Arkiv, then look up that wallet’s trades on the chain.</p></details><details><summary>Could she prove her record without revealing wallets at all?</summary><p>Yes, with zero-knowledge proofs over her trades, but that’s research-level work. It’s on our roadmap, not in the hackathon build.</p></details></div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Bigger-picture questions</h2>
+    <div class="general">
+      <div class="qs">
+        <div class="qhead">From judges</div>
+        <details><summary>Why not just a paid Telegram group?</summary><p>Telegram can’t prove a trader is one real person, can’t prove their record wasn’t edited, and doesn’t hide their wallet from copycats. It also sees every message.</p></details>
+        <details><summary>What if your server goes down or lies?</summary><p>Signals and promises live on Arkiv, signed by Priya’s key. Her app can post directly, and anyone can verify her record without us.</p></details>
+        <details><summary>Isn’t this just hiding money?</summary><p>It protects a trader’s strategy from copycats and front-running bots. Every person is a verified human, and Privacy Pools, coming to Kohaku, lets users prove their funds aren’t from known illicit sources.</p></details>
+      </div>
+      <div class="qs">
+        <div class="qhead">About the business</div>
+        <details><summary>Is selling trading signals legal?</summary><p>It can count as investment advice; in India, SEBI regulates this. A real launch needs licensed leaders or a structure reviewed by lawyers. The hackathon build runs on test funds.</p></details>
+        <details><summary>How do you get the first traders?</summary><p>Leaders earn from day one through fees on every copied trade, and a checkable record helps good but unknown traders stand out against fake leaderboards.</p></details>
+        <details><summary>How does SyndicateCopy make money?</summary><p>A share of the fee on every copied trade, attached through Flash. In the example, $0.50 of each $1.50.</p></details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>How the money ends up</h2>
+    <div class="money">
+      <div class="card">
+        <h3>Priya</h3>
+        <div class="big">about +$593</div>
+        <ul>
+          <li>Bought 2 ETH at $3,000, sold at $3,300</li>
+          <li>Plus $2.65 in fees from Arjun’s copy</li>
+          <li>Minus small relayer fees</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Arjun</h3>
+        <div class="big">about +$46</div>
+        <ul>
+          <li>Bought 0.1663 ETH at $3,006 with $500</li>
+          <li>Sold at $3,300</li>
+          <li>Paid $1.50 entry and $1.65 exit fees</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What we hide, and what we don’t</h2>
+    <div class="honest">
+      <div>
+        <h3>Hidden</h3>
+        <ul>
+          <li>The signal’s contents, from anyone without an active membership key</li>
+          <li>Which signals belong to which room, thanks to rotating HMAC tags</li>
+          <li>That a trade is Priya’s, until she reveals it after it closes</li>
+          <li>Priya’s and private-mode followers' balances, which exist only as private notes</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Weakened, not hidden</h3>
+        <ul>
+          <li>That the platform posted something, and roughly when</li>
+          <li>Timing matches between a trade and a post, reduced by random delays and decoys</li>
+          <li>Bursts of followers buying together, blurred by random delays and split orders</li>
+          <li>Patterns in revealed past trades, reduced by varying amounts and timing</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Still public</h3>
+        <ul>
+          <li>That someone bought ETH: trades are anonymous, not invisible</li>
+          <li>Default-mode followers’ trades from their own wallets (private mode hides them)</li>
+          <li>Leaked signals: we can trace leakers, not stop them</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Pitch lines</h2>
+    <blockquote class="line">Your followers get the signal. Everyone else gets ciphertext.</blockquote>
+    <blockquote class="line">Every trader is one real human, with a record they can’t edit.</blockquote>
+    <blockquote class="line">The trades are public. Who made them isn’t.</blockquote>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">SyndicateCopy concept for ETHGlobal Mumbai. All addresses, keys and amounts are illustrative.</div>
+</footer>
+
+<script>
+(function(){
+  const views = {
+    priya: {
+      cls:'open',
+      title:'What Priya sees',
+      body:`<div class="reveal"><div class="trade">Buy 2 ETH</div>
+        <dl class="kv"><dt>Entry</dt><dd>about $3,000</dd><dt>Stop-loss</dt><dd>$2,850</dd><dt>Take-profit</dt><dd>$3,300</dd><dt>From wallet</dt><dd><span class="addr">0xB2B2…E002</span> (single use)</dd><dt>Signed by</dt><dd><span class="addr">PK_priya</span></dd></dl>
+        <p class="verdict" style="color:var(--follow)">She placed it. Only her sealed promise ties the wallet to her.</p></div>`,
+      side:`<p><strong>Her identity:</strong> a World ID, a profile key, and the name “Priya’s ETH Swings.” No wallet on her profile.</p>
+        <p><strong>Her money:</strong> sits in a private pool. A fresh wallet does each trade, then gets retired.</p>
+        <p><strong>She earns:</strong> a share of every follower’s trade fee, paid to her private address.</p>`
+    },
+    arjun: {
+      cls:'open',
+      title:'What Arjun sees',
+      body:`<div class="reveal"><div class="trade">Buy ETH</div>
+        <dl class="kv"><dt>Entry</dt><dd>about $3,000</dd><dt>Stop-loss</dt><dd>$2,850</dd><dt>Take-profit</dt><dd>$3,300</dd><dt>Signature</dt><dd>Verified as Priya</dd><dt>Expires</dt><dd>in 10 minutes</dd></dl>
+        <p class="verdict" style="color:var(--follow)">Unlocked with his private key + decrypted AES key. One tap to copy.</p></div>`,
+      side:`<p><strong>Why he can read it:</strong> he paid membership, verified with World ID, and published his public key to Arkiv so Priya encrypted the AES key for him.</p>
+        <p><strong>What he doesn’t see:</strong> Priya’s wallet. He trusts her checkable record instead.</p>
+        <p><strong>Execution choice:</strong> Default TWAP from main wallet, or full Private Mode via Kohaku pool & burner wallet.</p>`
+    },
+    ravi: {
+      cls:'sealed',
+      title:'What Ravi sees',
+      body:`<div class="reveal"><div class="cipher">9f3a1c77e02b4d8a6f15c3e9b0d27a41e8c5f62b19d3a07e4c8b5f2a6d1e93c07b4f8a2d6e1c95b3a7f0d4e8c2b6a19f5d3e7c0b8a4f2d61e9c5b3a7</div>
+        <dl class="kv" style="margin-top:1rem"><dt>Tag</dt><dd><span class="addr">t_c41e…9a07</span></dd><dt>Posted by</dt><dd><span class="addr">0xPOST…0007</span> (all rooms)</dd><dt>Type</dt><dd>signal</dd></dl>
+        <p class="verdict" style="color:var(--seal)">He can’t read it, and can’t even tell which room it’s from.</p></div>`,
+      side:`<p><strong>On the blockchain:</strong> a brand-new wallet bought 2 ETH. Nothing ties it to Priya.</p>
+        <p><strong>On Arkiv:</strong> a stream of encrypted entries from the platform, each under a different tag.</p>
+        <p><strong>Watching a follower:</strong> default-mode copies arrive minutes later and spread out; private-mode followers show nothing.</p>
+        <p><strong>By the time he guesses:</strong> the move is over and the signal has expired.</p>`
+    }
+  };
+  const panel = document.getElementById('panel');
+  const tabs = document.querySelectorAll('.tabs button');
+  function show(who){
+    const v = views[who];
+    panel.innerHTML = `<div class="card signal ${v.cls}"><h3>${v.title}</h3>${v.body}</div><div class="side">${v.side}</div>`;
+    tabs.forEach(t=>{ const on = t.dataset.who===who; t.setAttribute('aria-selected', on); t.tabIndex = on?0:-1; });
+    panel.setAttribute('aria-labelledby','tab-'+who);
+  }
+  tabs.forEach((t,i)=>{
+    t.addEventListener('click',()=>show(t.dataset.who));
+    t.addEventListener('keydown',e=>{
+      if(e.key==='ArrowRight'||e.key==='ArrowLeft'){
+        const n=(i+(e.key==='ArrowRight'?1:tabs.length-1))%tabs.length;
+        tabs[n].focus(); show(tabs[n].dataset.who);
+      }
+    });
+  });
+  show('arjun');
+
+})();
+</script>
+</body>
+</html>

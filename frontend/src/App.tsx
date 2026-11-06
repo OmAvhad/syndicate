@@ -5,6 +5,7 @@ import { SignalProvider } from './context/SignalContext'
 import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import ProfilePage from './pages/ProfilePage'
+import FlashTradePage from './pages/FlashTradePage'
 import ExplorePage from './pages/ExplorePage'
 import LeaderTerminalPage from './pages/LeaderTerminalPage'
 import Navbar from './components/Navbar'
@@ -35,6 +36,10 @@ function AppRoutes() {
           <Route
             path="/"
             element={isAuthenticated ? <Dashboard /> : <LandingPage />}
+          />
+          <Route
+            path="/flash-trade"
+            element={<FlashTradePage />}
           />
           <Route
             path="/trade"

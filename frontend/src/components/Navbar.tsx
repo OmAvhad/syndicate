@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useSignals } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import ThemeToggle from '@/components/ThemeToggle'
-import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio } from 'lucide-react'
+import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio, Zap } from 'lucide-react'
 
 export default function Navbar() {
   const { user, logout } = useAuth()
@@ -74,6 +74,18 @@ export default function Navbar() {
             <span>Trade Terminal</span>
           </Link>
 
+          <Link
+            to="/flash-trade"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
+              location.pathname === '/flash-trade'
+                ? 'bg-accent text-text-inverse font-bold shadow-[0_0_12px_rgba(198,243,106,0.25)]'
+                : 'text-accent border border-accent/30 bg-accent-soft hover:bg-accent/20'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 fill-current" />
+            <span>Flash Orders</span>
+          </Link>
+
           {/* Active Signals Live Indicator */}
           {activeSignalCount > 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-pill bg-accent-soft border border-accent/40 text-xs text-accent animate-pulse font-semibold">
@@ -81,7 +93,6 @@ export default function Navbar() {
               <span>{activeSignalCount} Signal{activeSignalCount > 1 ? 's' : ''} Live</span>
             </div>
           )}
-
           {/* World ID Verified Pill */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-surface border border-border text-xs text-text-secondary">
             <span className="w-1.5 h-1.5 rounded-full bg-semantic-success shadow-[0_0_8px_rgba(121,217,154,0.6)]" />
@@ -212,6 +223,14 @@ export default function Navbar() {
                 {activeSignalCount} Live
               </span>
             )}
+          </Link>
+          <Link
+            to="/flash-trade"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
+          >
+            <Zap className="w-4 h-4 text-accent fill-current" />
+            <span>Flash Orders (Definitive)</span>
           </Link>
           <Link
             to="/profile"
