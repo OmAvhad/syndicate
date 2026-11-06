@@ -18,6 +18,21 @@ const formatUserResponse = (user) => ({
   subscriptionFee: user.subscriptionFee ?? 0.001,
   followersCount: user.followersCount ?? 0,
   followingCount: user.followingCount ?? 0,
+  subscribersCount: user.subscribersCount ?? 0,
+  subscribedCount: user.subscribedCount ?? 0,
+  riskLevel: user.riskLevel || 'MODERATE',
+  tradingStyle: user.tradingStyle || 'SWING',
+  tags: user.tags || [],
+  stats: user.stats || {
+    totalPnlUsdc: 0,
+    winRate: 0,
+    totalTrades: 0,
+    winningTrades: 0,
+    losingTrades: 0,
+    profitFactor: 0,
+    avgHoldMinutes: 0,
+    verifiedClaimsCount: 0,
+  },
   bio: user.bio || null,
   avatarUrl: user.avatarUrl || null,
   verificationLevel: user.verificationLevel,
@@ -43,21 +58,33 @@ router.get('/profile', async (req, res) => {
 
 // PUT /api/user/profile
 router.put('/profile', async (req, res) => {
-  const { username, bio, avatarUrl, subscriptionFee } = req.body;
+  const { username, bio, avatarUrl, subscriptionFee, riskLevel, tradingStyle, tags } = req.body;
 
   try {
+    const updateSet = {
+      ...(username !== undefined && { username: username.trim() }),
+      ...(bio !== undefined && { bio: bio.trim() }),
+      ...(avatarUrl !== undefined && { avatarUrl }),
+      ...(subscriptionFee !== undefined && !isNaN(Number(subscriptionFee)) && {
+        subscriptionFee: Math.max(0, Number(subscriptionFee)),
+      }),
+    };
+
+    if (riskLevel && ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE', 'DEGEN'].includes(riskLevel.toUpperCase())) {
+      updateSet.riskLevel = riskLevel.toUpperCase();
+    }
+
+    if (tradingStyle && ['SWING', 'DAY_TRADER', 'SCALPER', 'POSITION'].includes(tradingStyle.toUpperCase())) {
+      updateSet.tradingStyle = tradingStyle.toUpperCase();
+    }
+
+    if (Array.isArray(tags)) {
+      updateSet.tags = tags.map((t) => t.toLowerCase().replace(/[^a-z0-9_-]/g, '').trim()).filter(Boolean);
+    }
+
     const user = await User.findByIdAndUpdate(
       req.user.userId,
-      {
-        $set: {
-          ...(username !== undefined && { username: username.trim() }),
-          ...(bio !== undefined && { bio: bio.trim() }),
-          ...(avatarUrl !== undefined && { avatarUrl }),
-          ...(subscriptionFee !== undefined && !isNaN(Number(subscriptionFee)) && {
-            subscriptionFee: Math.max(0, Number(subscriptionFee)),
-          }),
-        },
-      },
+      { $set: updateSet },
       { new: true }
     );
 

@@ -23,7 +23,39 @@ import {
   Clock,
   AlertCircle,
   Database,
+  TrendingUp,
+  Radio,
+  Zap,
+  Tag,
+  Filter,
 } from 'lucide-react'
+
+const RISK_BADGES: Record<string, { label: string; bg: string; text: string; border: string }> = {
+  CONSERVATIVE: {
+    label: 'Conservative',
+    bg: 'bg-emerald-500/10',
+    text: 'text-emerald-400',
+    border: 'border-emerald-500/30',
+  },
+  MODERATE: {
+    label: 'Moderate',
+    bg: 'bg-blue-500/10',
+    text: 'text-blue-400',
+    border: 'border-blue-500/30',
+  },
+  AGGRESSIVE: {
+    label: 'Aggressive',
+    bg: 'bg-amber-500/10',
+    text: 'text-amber-400',
+    border: 'border-amber-500/30',
+  },
+  DEGEN: {
+    label: 'Degen Alpha',
+    bg: 'bg-purple-500/10',
+    text: 'text-purple-400',
+    border: 'border-purple-500/30',
+  },
+}
 
 interface ExploreUser {
   id: string
@@ -34,8 +66,22 @@ interface ExploreUser {
   subscriptionFee: number
   followersCount: number
   followingCount: number
+  subscribersCount?: number
+  subscribedCount?: number
+  riskLevel?: 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE' | 'DEGEN'
+  tradingStyle?: string
+  tags?: string[]
+  stats?: {
+    totalPnlUsdc?: number
+    winRate?: number
+    totalTrades?: number
+    winningTrades?: number
+    profitFactor?: number
+    verifiedClaimsCount?: number
+  }
   createdAt: string
   isFollowing: boolean
+  isSubscribed?: boolean
   activeUntil: string | null
   arkivEntityKey: string | null
 }
@@ -81,6 +127,7 @@ export default function ExplorePage() {
 
   // Navigation Filter Tabs: 'all' | 'following' | 'followers'
   const [activeTab, setActiveTab] = useState<'all' | 'following' | 'followers'>('all')
+  const [riskFilter, setRiskFilter] = useState<string>('ALL')
   const [followingList, setFollowingList] = useState<FollowRelationshipItem[]>([])
   const [followersList, setFollowersList] = useState<FollowRelationshipItem[]>([])
   const [loadingSocial, setLoadingSocial] = useState(false)
@@ -92,6 +139,7 @@ export default function ExplorePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [unfollowingId, setUnfollowingId] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [socialLoading, setSocialLoading] = useState<Record<string, boolean>>({})
 
   const fetchSocialLists = useCallback(async () => {
     try {
@@ -116,7 +164,11 @@ export default function ExplorePage() {
   const fetchUsers = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await api.get('/api/explore')
+      const params: Record<string, string> = {}
+      if (riskFilter !== 'ALL') {
+        params.riskLevel = riskFilter
+      }
+      const res = await api.get('/api/explore', { params })
       if (res.data?.success) {
         setUsers(res.data.users)
       }
@@ -125,7 +177,33 @@ export default function ExplorePage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [riskFilter])
+
+  const handleToggleSocialFollow = async (leader: ExploreUser) => {
+    const leaderId = leader.id
+    try {
+      setSocialLoading((prev) => ({ ...prev, [leaderId]: true }))
+      if (leader.isFollowing) {
+        await api.delete(`/social/unfollow/${leaderId}`)
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === leaderId ? { ...u, isFollowing: false, followersCount: Math.max(0, u.followersCount - 1) } : u
+          )
+        )
+      } else {
+        await api.post(`/social/follow/${leaderId}`)
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === leaderId ? { ...u, isFollowing: true, followersCount: u.followersCount + 1 } : u
+          )
+        )
+      }
+    } catch (err) {
+      console.error('Failed to toggle social follow:', err)
+    } finally {
+      setSocialLoading((prev) => ({ ...prev, [leaderId]: false }))
+    }
+  }
 
   useEffect(() => {
     fetchUsers()
@@ -373,6 +451,32 @@ export default function ExplorePage() {
               {activeTab === 'followers' && <><strong>{followersList.length}</strong> verified human(s) follow you</>}
             </div>
           </div>
+
+          {/* Risk Level Filter Bar (Visible in 'All Leaders' view) */}
+          {activeTab === 'all' && (
+            <div className="mt-4 pt-3 border-t border-border flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+              <span className="text-text-muted text-[11px] font-semibold flex items-center gap-1.5 mr-1 shrink-0">
+                <Filter className="w-3 h-3" /> Risk Profile:
+              </span>
+              {['ALL', 'CONSERVATIVE', 'MODERATE', 'AGGRESSIVE', 'DEGEN'].map((tier) => {
+                const isActive = riskFilter === tier
+                return (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() => setRiskFilter(tier)}
+                    className={`px-2.5 py-1 rounded text-[11px] font-bold uppercase transition-all whitespace-nowrap cursor-pointer ${
+                      isActive
+                        ? 'bg-accent text-text-inverse shadow-sm'
+                        : 'bg-surface-raised hover:bg-surface-hover text-text-muted hover:text-text-primary border border-border'
+                    }`}
+                  >
+                    {tier === 'ALL' ? 'All Profiles' : tier}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* -----------------------------------------------------------------
@@ -388,10 +492,10 @@ export default function ExplorePage() {
             ) : filteredUsers.length === 0 ? (
               <div className="surface p-12 text-center">
                 <Users className="w-10 h-10 text-text-muted mx-auto mb-3 stroke-[1.5]" />
-                <h3 className="text-base font-bold text-text-primary mb-1">No other users found</h3>
+                <h3 className="text-base font-bold text-text-primary mb-1">No leaders found</h3>
                 <p className="text-xs text-text-muted max-w-sm mx-auto">
-                  {searchQuery
-                    ? 'No leaders matched your search query. Try another term.'
+                  {searchQuery || riskFilter !== 'ALL'
+                    ? 'No leaders matched your search or risk filter criteria. Try adjusting your filters.'
                     : 'There are no other registered users yet. Test with another simulated identity!'}
                 </p>
               </div>
@@ -400,13 +504,16 @@ export default function ExplorePage() {
                 {filteredUsers.map((leader) => {
                   const leaderIdentifier = leader.username ? `@${leader.username}` : truncateHash(leader.nullifierHash, 8)
                   const avatarLetter = (leader.username || truncateHash(leader.nullifierHash))[0].toUpperCase()
+                  const riskCfg = leader.riskLevel ? RISK_BADGES[leader.riskLevel] : RISK_BADGES.MODERATE
+                  const winRateVal = leader.stats?.winRate !== undefined ? leader.stats.winRate : 0
+                  const pnlVal = leader.stats?.totalPnlUsdc ?? 0
 
                   return (
-                    <Card key={leader.id} className="flex flex-col justify-between">
-                      <CardContent className="p-5 flex flex-col h-full justify-between gap-5">
+                    <Card key={leader.id} className="flex flex-col justify-between hover:border-accent/40 transition-colors">
+                      <CardContent className="p-5 flex flex-col h-full justify-between gap-4">
                         <div>
-                          {/* Top Row: Avatar & Badges */}
-                          <div className="flex items-start justify-between gap-3 mb-3">
+                          {/* Top Row: Avatar & Identity */}
+                          <div className="flex items-start justify-between gap-3 mb-2.5">
                             <div className="flex items-center gap-3 min-w-0">
                               <div className="w-11 h-11 rounded-md bg-surface-raised border border-border flex items-center justify-center font-bold text-accent shrink-0 text-base">
                                 {avatarLetter}
@@ -417,82 +524,132 @@ export default function ExplorePage() {
                                 </div>
                                 <div className="flex items-center gap-1.5 text-[11px] text-text-muted mt-0.5">
                                   <ShieldCheck className="w-3 h-3 text-semantic-success stroke-[2.2]" />
-                                  <span>World ID Human</span>
+                                  <span>World ID Verified</span>
                                 </div>
                               </div>
                             </div>
 
-                            {leader.isFollowing ? (
-                              <Badge variant="success" className="shrink-0 text-[10px]">
-                                <UserCheck className="w-3 h-3" />
-                                Following
-                              </Badge>
-                            ) : (
-                              <Badge variant="accent" className="shrink-0 text-[10px]">
-                                {leader.subscriptionFee} ETH / 30d
-                              </Badge>
+                            {/* Risk Badge */}
+                            {riskCfg && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${riskCfg.bg} ${riskCfg.text} ${riskCfg.border}`}>
+                                {riskCfg.label}
+                              </span>
                             )}
                           </div>
 
+                          {/* Trading Style & Subscription Price */}
+                          <div className="flex items-center justify-between text-[11px] mb-2.5">
+                            <span className="text-text-muted font-medium">
+                              Style: <strong className="text-text-primary uppercase">{leader.tradingStyle || 'DISCRETIONARY'}</strong>
+                            </span>
+                            <span className="mono tnum text-accent font-bold">
+                              {leader.subscriptionFee} ETH / 30d
+                            </span>
+                          </div>
+
                           {/* Bio */}
-                          <p className="text-xs text-text-secondary leading-relaxed mb-4 line-clamp-2">
+                          <p className="text-xs text-text-secondary leading-relaxed mb-3 line-clamp-2">
                             {leader.bio || 'Verified trader & strategist. Open for syndicate copy relationships.'}
                           </p>
 
-                          {/* Public Key / Wallet Info */}
-                          <div className="p-2.5 rounded-sm bg-surface-raised border border-border text-xs mb-4 space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-semibold text-text-muted">Public Address</span>
-                              {leader.walletAddress ? (
-                                <button
-                                  type="button"
-                                  onClick={() => copyToClipboard(leader.walletAddress!, `addr-${leader.id}`)}
-                                  className="copy-chip text-[10px] py-0.5 px-1.5"
-                                >
-                                  <span className="mono tnum">{truncateHash(leader.walletAddress, 6)}</span>
-                                  {copiedKey === `addr-${leader.id}` ? (
-                                    <Check className="w-2.5 h-2.5 text-semantic-success" />
-                                  ) : (
-                                    <Copy className="w-2.5 h-2.5" />
-                                  )}
-                                </button>
-                              ) : (
-                                <span className="text-[10px] text-semantic-warning">No wallet linked</span>
-                              )}
+                          {/* Tags */}
+                          {leader.tags && leader.tags.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                              {leader.tags.map((t, i) => (
+                                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border text-text-muted">
+                                  #{t}
+                                </span>
+                              ))}
                             </div>
+                          )}
 
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] uppercase font-semibold text-text-muted">Followers</span>
-                              <span className="mono tnum text-xs font-bold text-text-primary">{leader.followersCount}</span>
+                          {/* Performance Stats Metrics Bar */}
+                          <div className="grid grid-cols-3 gap-2 p-2.5 rounded-md bg-surface-raised border border-border text-center mb-3">
+                            <div>
+                              <div className="text-[9px] uppercase font-bold text-text-muted">Win Rate</div>
+                              <div className={`mono tnum text-xs font-black mt-0.5 ${winRateVal >= 60 ? 'text-semantic-success' : 'text-text-primary'}`}>
+                                {winRateVal > 0 ? `${winRateVal.toFixed(1)}%` : '—'}
+                              </div>
                             </div>
+                            <div>
+                              <div className="text-[9px] uppercase font-bold text-text-muted">Net PnL</div>
+                              <div className={`mono tnum text-xs font-black mt-0.5 ${pnlVal > 0 ? 'text-semantic-success' : pnlVal < 0 ? 'text-semantic-danger' : 'text-text-primary'}`}>
+                                {pnlVal !== 0 ? `${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}` : '$0.00'}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[9px] uppercase font-bold text-text-muted">Subscribers</div>
+                              <div className="mono tnum text-xs font-black text-text-primary mt-0.5">
+                                {leader.subscribersCount ?? leader.followersCount ?? 0}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Public Address */}
+                          <div className="p-2 rounded bg-surface-raised/60 border border-border/80 flex items-center justify-between text-xs mb-1">
+                            <span className="text-[10px] uppercase font-semibold text-text-muted">Wallet</span>
+                            {leader.walletAddress ? (
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(leader.walletAddress!, `addr-${leader.id}`)}
+                                className="copy-chip text-[10px] py-0.5 px-1.5"
+                              >
+                                <span className="mono tnum">{truncateHash(leader.walletAddress, 6)}</span>
+                                {copiedKey === `addr-${leader.id}` ? (
+                                  <Check className="w-2.5 h-2.5 text-semantic-success" />
+                                ) : (
+                                  <Copy className="w-2.5 h-2.5" />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-semantic-warning">No wallet linked</span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Action Button */}
-                        <div className="pt-2 border-t border-border">
-                          {leader.isFollowing ? (
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleUnfollow(leader.id)}
-                                disabled={unfollowingId === leader.id}
-                                className="flex-1 py-2 px-3 rounded-md bg-surface-raised hover:bg-semantic-danger/10 border border-border hover:border-semantic-danger/30 text-xs font-semibold text-semantic-danger transition-colors duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                              >
-                                {unfollowingId === leader.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : null}
-                                <span>Unfollow</span>
-                              </button>
+                        {/* Dual Action Buttons: Free Follow + Paid Copy-Trade Subscribe */}
+                        <div className="pt-2 border-t border-border flex items-center gap-2">
+                          {/* 1-Click Free Social Follow */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSocialFollow(leader)}
+                            disabled={socialLoading[leader.id]}
+                            className={`flex-1 py-1.5 px-2.5 rounded-md text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer border ${
+                              leader.isFollowing
+                                ? 'bg-surface-raised border-accent/40 text-accent hover:border-semantic-danger/40 hover:text-semantic-danger'
+                                : 'bg-surface-raised hover:bg-surface-hover border-border text-text-secondary hover:text-text-primary'
+                            }`}
+                          >
+                            {socialLoading[leader.id] ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : leader.isFollowing ? (
+                              <>
+                                <Check className="w-3 h-3" />
+                                <span>Following</span>
+                              </>
+                            ) : (
+                              <>
+                                <UserPlus className="w-3 h-3" />
+                                <span>Follow</span>
+                              </>
+                            )}
+                          </button>
+
+                          {/* Paid Gated Copy-Trade Subscribe */}
+                          {leader.isSubscribed ? (
+                            <div className="flex-1 py-1.5 px-2.5 rounded-md bg-semantic-success/15 border border-semantic-success/30 text-semantic-success text-xs font-bold flex items-center justify-center gap-1">
+                              <Zap className="w-3 h-3" />
+                              <span>Subscribed</span>
                             </div>
                           ) : (
                             <button
                               type="button"
                               onClick={() => handleOpenFollowModal(leader)}
                               disabled={!leader.walletAddress}
-                              className="w-full py-2 px-3 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all duration-fast flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
+                              className="flex-1 py-1.5 px-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_10px_rgba(198,243,106,0.18)]"
                             >
-                              <UserPlus className="w-3.5 h-3.5 stroke-[2.2]" />
-                              <span>Follow ({leader.subscriptionFee} ETH)</span>
+                              <Radio className="w-3 h-3 stroke-[2.5]" />
+                              <span>Copy Trade</span>
                             </button>
                           )}
                         </div>
@@ -802,7 +959,7 @@ export default function ExplorePage() {
                 <div className="flex items-center gap-2">
                   <Database className="w-5 h-5 text-accent stroke-[2]" />
                   <h3 className="text-base font-bold text-text-primary">
-                    Follow & Anchor on Arkiv
+                    Subscribe & Anchor on Arkiv
                   </h3>
                 </div>
                 <button
@@ -848,8 +1005,8 @@ export default function ExplorePage() {
                   <div className="p-3 rounded-md bg-accent-soft border border-accent/20 text-xs text-text-primary flex items-start gap-2.5">
                     <Sparkles className="w-4 h-4 text-accent shrink-0 mt-0.5" />
                     <div>
-                      <strong>Decentralized Arkiv Schema:</strong> Your subscription sends the fee directly to the leader via MetaMask. 
-                      Once confirmed, the relationship is recorded on Arkiv with a 30-day expiration.
+                      <strong>Decentralized Copy-Trading Epoch:</strong> Your subscription sends {selectedLeader.subscriptionFee} ETH directly to the leader via MetaMask.
+                      Once confirmed on Base Sepolia, the subscription is recorded on Arkiv to grant 30 days of real-time encrypted trade copy signals.
                     </div>
                   </div>
 
@@ -871,7 +1028,7 @@ export default function ExplorePage() {
                     <button
                       type="button"
                       onClick={handleCloseModal}
-                      className="flex-1 py-2.5 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors"
+                      className="flex-1 py-2.5 rounded-md bg-surface-raised hover:bg-surface-hover border border-border text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -879,9 +1036,9 @@ export default function ExplorePage() {
                       type="button"
                       onClick={handleExecuteSubscription}
                       disabled={!user?.walletAddress || !selectedLeader.walletAddress}
-                      className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
-                      Pay & Follow
+                      Pay & Subscribe
                     </button>
                   </div>
                 </div>

@@ -9,6 +9,8 @@ import FlashTradePage from './pages/FlashTradePage'
 import ExplorePage from './pages/ExplorePage'
 import LeaderTerminalPage from './pages/LeaderTerminalPage'
 import TradeHistoryPage from './pages/TradeHistoryPage'
+import LeaderboardPage from './pages/LeaderboardPage'
+import FeedPage from './pages/FeedPage'
 import Navbar from './components/Navbar'
 import TradeSignalBanner from './components/TradeSignalBanner'
 
@@ -47,6 +49,14 @@ function AppRoutes() {
             element={isAuthenticated ? <LeaderTerminalPage /> : <Navigate to="/" replace />}
           />
           <Route path="/history" element={isAuthenticated ? <TradeHistoryPage /> : <Navigate to="/" replace />} />
+          <Route
+            path="/leaderboard"
+            element={isAuthenticated ? <LeaderboardPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/feed"
+            element={isAuthenticated ? <FeedPage /> : <Navigate to="/" replace />}
+          />
           <Route
             path="/explore"
             element={isAuthenticated ? <ExplorePage /> : <Navigate to="/" replace />}

@@ -11,6 +11,7 @@ import { claimTradeResult, readResultClaims, matchingClaim } from '../services/p
 import { hashTradePayload, encryptTradeSignal, decryptTradeSignal, encryptForMetaMask } from '../services/tradeCrypto.js';
 import { storeTradeSignalInArkiv, storeTradePromiseInArkiv } from '../services/arkiv.js';
 import { sendSignalToFollower, broadcastToAll } from '../websocket.js';
+import { recalculateLeaderStats } from '../services/statsCalculator.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -517,6 +518,8 @@ router.post('/:tradeId/exit', async (req, res) => {
     if (returned.amount !== BigInt(trade.wethUnits) || payout.amount !== exitPayout(trade.entryUsdcUnits, trade.wethUnits, price)) throw new Error('Exit transfers do not match this position and scenario payout.');
     if (BigInt(payout.receipt.blockNumber) < BigInt(returned.receipt.blockNumber)) throw new Error('Exit payout predates the position return.');
     const closed = await Trade.findOneAndUpdate({ _id: trade._id, userId: req.user.userId, status: 'EXECUTED' }, { $set: { status: 'CLOSED', exitType, exitPrice: price, exitReturnTxHash, exitPayoutTxHash, exitUsdcUnits: payout.amount.toString(), realizedPnlUnits: (payout.amount - BigInt(trade.entryUsdcUnits)).toString(), exitGasWei: returned.gasWei, closedAt: await blockTimestamp(payout.receipt.blockNumber) } }, { new: true });
+    // Recalculate cached leader stats
+    recalculateLeaderStats(req.user.userId).catch(() => {});
     return res.json({ success: true, trade: closed || await Trade.findById(trade._id) });
   } catch (error) { return res.status(400).json({ error: error.message || 'Exit recording failed; keep both receipt hashes and retry.' }); }
 });
@@ -536,6 +539,7 @@ router.post('/:tradeId/claim', async (req, res) => {
     trade.claimEntityKey = claim.entityKey;
     if (claim.txHash) trade.claimTxHash = claim.txHash;
     await trade.save();
+    recalculateLeaderStats(req.user.userId).catch(() => {});
     return res.json({ success: true, ...claim });
   } catch (error) { return res.status(400).json({ error: error.message || 'Claim verification/write failed. Refresh Arkiv status before retrying.' }); }
 });
