@@ -30,13 +30,13 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto h-16 px-6 flex items-center justify-between">
         {/* Brand */}
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-8 h-8 rounded-sm bg-accent flex items-center justify-center transition-transform duration-fast ease-standard group-hover:scale-105 shadow-[0_0_16px_rgba(198,243,106,0.2)]">
+          <div className="w-8 h-8 rounded-md bg-accent flex items-center justify-center transition-transform duration-fast ease-standard group-hover:scale-105 shadow-[0_0_16px_rgba(198,243,106,0.2)]">
             <ShieldCheck className="w-4 h-4 text-text-inverse stroke-[2.2]" />
           </div>
           <div className="flex items-center gap-2">
-            <span className="font-bold text-base tracking-tight text-text-primary">WorldAuth</span>
+            <span className="font-extrabold text-base tracking-wider text-text-primary uppercase">SYNDICATE</span>
             <span className="text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded-pill bg-accent-soft text-accent border border-accent/25">
-              ZK-ID
+              SHIELDED
             </span>
           </div>
         </Link>

@@ -136,7 +136,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
     }
   }, [signal.amount])
 
-  const isEncrypted = Boolean(signal.requiresMetaMaskDecrypt && !signal.isDecrypted)
+  const isEncrypted = !signal.isDecrypted || signal.limit == null
 
   const handleDecrypt = async (refreshEncryption = false) => {
     setIsDecrypting(true)
@@ -655,7 +655,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
             </div>
 
             {/* Asymmetric Private-Key Decryption Banner if signal is encrypted */}
-            {signal.requiresMetaMaskDecrypt && (
+            {(signal.requiresMetaMaskDecrypt || isEncrypted) && (
               <div
                 className={`p-3.5 rounded-md border text-xs transition-all ${
                   isEncrypted

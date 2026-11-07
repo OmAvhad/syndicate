@@ -5,7 +5,7 @@ import {
   type IDKitResult,
 } from '@worldcoin/idkit'
 import { orbLegacy, deviceLegacy } from '@worldcoin/idkit'
-import { ShieldCheck, Loader2 } from 'lucide-react'
+import { ShieldCheck, Loader2, Fingerprint, ArrowRight } from 'lucide-react'
 import api from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +13,8 @@ interface WorldIDButtonProps {
   onVerified: (token: string, user: object) => void
   className?: string
   size?: 'default' | 'lg'
+  label?: string
+  showArrow?: boolean
 }
 
 type RpContext = {
@@ -31,7 +33,13 @@ const APP_ID = import.meta.env.VITE_APP_ID as `app_${string}`
 const ACTION = import.meta.env.VITE_ACTION || 'user-login'
 const DEFAULT_ENV = (import.meta.env.VITE_WORLDID_ENV || 'staging') as EnvironmentType
 
-export default function WorldIDButton({ onVerified, className, size = 'lg' }: WorldIDButtonProps) {
+export default function WorldIDButton({
+  onVerified,
+  className,
+  size = 'lg',
+  label = 'Verify with World ID',
+  showArrow = false,
+}: WorldIDButtonProps) {
   const [open, setOpen] = useState(false)
   const [rpContext, setRpContext] = useState<RpContext | null>(null)
   const [currentEnv, setCurrentEnv] = useState<EnvironmentType>(DEFAULT_ENV)
@@ -121,17 +129,20 @@ export default function WorldIDButton({ onVerified, className, size = 'lg' }: Wo
         onClick={handleOpen}
         disabled={loading}
         className={cn(
-          'inline-flex items-center justify-center gap-2.5 rounded-md font-bold text-text-inverse bg-accent hover:bg-[#d4f885] active:translate-y-0 transition-all duration-fast ease-standard cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed select-none shadow-[0_2px_18px_rgba(198,243,106,0.22)] hover:shadow-[0_4px_24px_rgba(198,243,106,0.34)] hover:-translate-y-px',
+          'inline-flex items-center justify-center gap-2.5 rounded-pill font-bold text-text-inverse bg-accent hover:bg-[#d4f885] active:translate-y-0 transition-all duration-fast ease-standard cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed select-none shadow-[0_2px_18px_rgba(198,243,106,0.22)] hover:shadow-[0_4px_24px_rgba(198,243,106,0.34)] hover:-translate-y-px',
           size === 'lg' ? 'px-8 py-3.5 text-base' : 'px-5 py-2.5 text-sm',
           className
         )}
       >
         {loading ? (
-          <Loader2 className="w-4 h-4 animate-spin text-text-inverse" />
+          <Loader2 className="w-5 h-5 animate-spin text-text-inverse" />
         ) : (
-          <ShieldCheck className="w-5 h-5 text-text-inverse stroke-[2.2]" />
+          <Fingerprint className="w-5 h-5 text-text-inverse stroke-[2.2]" />
         )}
-        <span>{loading ? 'Initialising Secure Session...' : 'Verify with World ID'}</span>
+        <span>{loading ? 'Initialising Secure Session...' : label}</span>
+        {showArrow && !loading && (
+          <ArrowRight className="w-4 h-4 text-text-inverse stroke-[2.4] ml-0.5 transition-transform group-hover:translate-x-0.5" />
+        )}
       </button>
 
       {error && (
