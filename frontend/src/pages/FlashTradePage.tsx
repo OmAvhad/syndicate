@@ -149,7 +149,7 @@ const BASE_WETH: Address = '0x4200000000000000000000000000000000000006'
 const BASE_USDC: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' // Official Circle Native USDC on Base
 const BASE_AERO: Address = '0x940181a94A35A4569E4529A3CDfB74e38FD98631' // Aerodrome token on Base
 const BASE_DEFINITIVE_FLASH_ROUTER: Address =
-  '0x1111111111111111111111111111111111111111'
+  '0x5d00000873b6BF41539e6f5365B0Ff7d3c368f78' // Definitive Flash Allowance Verifying Contract on Base
 
 // Minimal WETH ABI for live onchain deposit (wrap) and withdraw (unwrap)
 const WETH_ABI = [

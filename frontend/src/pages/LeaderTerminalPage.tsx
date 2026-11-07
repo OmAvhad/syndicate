@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { formatEther, parseUnits } from 'viem'
+import { formatEther, parseUnits, type Address } from 'viem'
 import type { PoolView } from '@/lib/shielded/pool'
 import type { FundingQuote, TradingBurner } from '@/lib/shielded/tradeFunding'
 import { scopeKey } from '@/lib/shielded/storage'
@@ -18,8 +18,28 @@ import {
   fetchSepoliaBalances,
   FLASH_TRADE_POOL_ADDRESS,
 } from '@/lib/flashEngine'
+import {
+  getOrCreateBaseBurner,
+  rotateBaseBurner,
+  fetchBaseMainnetBalances,
+  fundBaseBurnerFromMetaMask,
+  sweepBaseBurnerToMainWallet,
+  BASE_MAINNET_EXPLORER,
+  BASE_WETH,
+  BASE_USDC,
+  type BaseBurnerAccount,
+  type BaseBurnerBalances,
+} from '@/lib/baseBurner'
+import {
+  fetchDefinitiveQuote,
+  signDefinitiveOrder,
+  prepareBurnerForDefinitiveTrade,
+  submitDefinitiveOrder,
+  type DefinitiveQuoteResponse,
+} from '@/lib/definitiveService'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import {
   TrendingUp,
   ArrowUpRight,
@@ -40,6 +60,11 @@ import {
   Zap,
   Download,
   Terminal,
+  Globe,
+  Wallet,
+  ArrowRightLeft,
+  X,
+  AlertTriangle,
 } from 'lucide-react'
 
 const SYMBOLS = [
@@ -79,7 +104,7 @@ export default function LeaderTerminalPage() {
   const [fundingEvidence, setFundingEvidence] = useState<{ operation?: string; transaction?: string }>({})
   const [proofReady, setProofReady] = useState(false)
   const [proofPreparing, setProofPreparing] = useState(false)
-  const [proofMessage, setProofMessage] = useState('Checking proof files…')
+  const [proofMessage, setProofMessage] = useState('Checking proof filesâ¦')
   useEffect(() => {
     let active = true
     void artifactsReady().then(ready => {
@@ -89,9 +114,9 @@ export default function LeaderTerminalPage() {
   }, [])
   const prepareProofFiles = async () => {
     setProofPreparing(true); setProofReady(false)
-    setProofMessage('Preparing proof files…')
+    setProofMessage('Preparing proof filesâ¦')
     try {
-      await prepareArtifacts((loaded, total, files) => setProofMessage(`Preparing proof files: ${Math.round(loaded / total * 100)}% · ${files}/75 files · ${(loaded / 1048576).toFixed(1)} MiB cached`))
+      await prepareArtifacts((loaded, total, files) => setProofMessage(`Preparing proof files: ${Math.round(loaded / total * 100)}% Â· ${files}/75 files Â· ${(loaded / 1048576).toFixed(1)} MiB cached`))
       setProofReady(true); setProofMessage('Proof files ready on this device. Trading uses the cached files.')
     } catch (error) { setProofMessage((error as Error).message) }
     finally { setProofPreparing(false) }
@@ -238,6 +263,302 @@ export default function LeaderTerminalPage() {
     }
   }
 
+  // Network Mode Toggle
+  const [networkMode, setNetworkMode] = useState<'BASE_MAINNET' | 'SEPOLIA_TESTNET'>('BASE_MAINNET')
+
+  // Base Mainnet Burner State
+  const [baseBurner, setBaseBurner] = useState<BaseBurnerAccount>(() => getOrCreateBaseBurner())
+  const [baseBalances, setBaseBalances] = useState<BaseBurnerBalances | null>(null)
+  const [isLoadingBaseBalances, setIsLoadingBaseBalances] = useState(false)
+  const [fundModalOpen, setFundModalOpen] = useState(false)
+  const [fundAmount, setFundAmount] = useState('0.0003')
+  const [isFundingBurner, setIsFundingBurner] = useState(false)
+  const [isSweepingBurner, setIsSweepingBurner] = useState(false)
+  const [definitiveQuote, setDefinitiveQuote] = useState<DefinitiveQuoteResponse | null>(null)
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false)
+  const [quoteError, setQuoteError] = useState<string | null>(null)
+
+  const loadBaseBalances = useCallback(async () => {
+    try {
+      setIsLoadingBaseBalances(true)
+      const bal = await fetchBaseMainnetBalances(baseBurner.address)
+      setBaseBalances(bal)
+    } catch (err) {
+      console.warn('Failed to load Base Mainnet balances:', err)
+    } finally {
+      setIsLoadingBaseBalances(false)
+    }
+  }, [baseBurner.address])
+
+  useEffect(() => {
+    loadBaseBalances()
+  }, [loadBaseBalances])
+
+  // Update Definitive Quote when parameters change
+  const updateDefinitiveQuote = useCallback(async () => {
+    if (networkMode !== 'BASE_MAINNET') return
+    try {
+      setIsLoadingQuote(true)
+      setQuoteError(null)
+      const qtyStr = amount || (side === 'BUY' ? '0.30' : '0.0001')
+      const targetAsset = BASE_WETH
+      const contraAsset = BASE_USDC
+      const res = await fetchDefinitiveQuote({
+        targetAsset,
+        contraAsset,
+        side: side === 'BUY' ? 'buy' : 'sell',
+        qty: qtyStr,
+        funderAddress: baseBurner.address,
+      })
+      setDefinitiveQuote(res)
+    } catch (err: unknown) {
+      const e = err as Error
+      setQuoteError(e.message || 'Failed to fetch quote')
+      setDefinitiveQuote(null)
+    } finally {
+      setIsLoadingQuote(false)
+    }
+  }, [networkMode, amount, side, baseBurner.address])
+
+  useEffect(() => {
+    if (networkMode === 'BASE_MAINNET') {
+      const timer = setTimeout(() => {
+        updateDefinitiveQuote()
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [updateDefinitiveQuote, networkMode])
+
+  const handleFundBaseBurner = async () => {
+    if (!user?.walletAddress) {
+      setErrorMessage('Please connect MetaMask first.')
+      return
+    }
+    try {
+      setIsFundingBurner(true)
+      setErrorMessage(null)
+      addTradeLog('info', `Requesting MetaMask to transfer ${fundAmount} ETH to burner ${truncateHash(baseBurner.address, 6)} on Base Mainnet...`)
+      const txHash = await fundBaseBurnerFromMetaMask(baseBurner.address, fundAmount)
+      addTradeLog('success', `Burner funded with ${fundAmount} ETH on Base Mainnet!`, {
+        label: 'BaseScan Tx',
+        url: `${BASE_MAINNET_EXPLORER}/tx/${txHash}`,
+      })
+      await loadBaseBalances()
+      setFundModalOpen(false)
+    } catch (err: unknown) {
+      const e = err as Error
+      setErrorMessage(e.message || 'Funding failed.')
+      addTradeLog('warn', `Funding failed: ${e.message}`)
+    } finally {
+      setIsFundingBurner(false)
+    }
+  }
+
+  const handleSweepBaseBurner = async () => {
+    if (!user?.walletAddress) {
+      setErrorMessage('Please connect MetaMask first.')
+      return
+    }
+    try {
+      setIsSweepingBurner(true)
+      setErrorMessage(null)
+      addTradeLog('info', `Sweeping remaining ETH from burner back to ${truncateHash(user.walletAddress, 6)}...`)
+      const txHash = await sweepBaseBurnerToMainWallet(baseBurner.privateKey, user.walletAddress as Address)
+      addTradeLog('success', `Successfully swept residual funds back to main wallet!`, {
+        label: 'BaseScan Sweep Tx',
+        url: `${BASE_MAINNET_EXPLORER}/tx/${txHash}`,
+      })
+      await loadBaseBalances()
+    } catch (err: unknown) {
+      const e = err as Error
+      setErrorMessage(e.message || 'Sweep failed.')
+      addTradeLog('warn', `Sweep failed: ${e.message}`)
+    } finally {
+      setIsSweepingBurner(false)
+    }
+  }
+
+  const handleRotateBaseBurner = () => {
+    if (baseBalances && (baseBalances.ethRaw > 0n || baseBalances.usdcRaw > 0n)) {
+      if (!confirm('This burner still has a balance. Sweeping funds first is recommended. Continue rotating?')) {
+        return
+      }
+    }
+    const fresh = rotateBaseBurner()
+    setBaseBurner(fresh)
+    addTradeLog('info', `Minted fresh Base Mainnet burner: ${truncateHash(fresh.address, 6)}`)
+    loadBaseBalances()
+  }
+
+  // Base Mainnet Leader Trade Flow
+  const executeBaseMainnetLeaderFlow = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (submittingRef.current) return
+    if (!user?.walletAddress) {
+      setErrorMessage('Please connect your MetaMask wallet before placing leader trades.')
+      return
+    }
+
+    try {
+      submittingRef.current = true
+      setIsSubmitting(true)
+      setErrorMessage(null)
+      setTradeLogs([])
+      setStep('promising')
+      setStepMessage('Requesting Definitive Flash Quote on Base Mainnet...')
+
+      const targetAsset = BASE_WETH
+      const contraAsset = BASE_USDC
+      const tradeQty = amount || '0.0001'
+
+      addTradeLog('info', `Requesting Definitive Flash Quote: ${side} ${tradeQty} WETH on Base Mainnet...`)
+      const quote = await fetchDefinitiveQuote({
+        targetAsset,
+        contraAsset,
+        side: side === 'BUY' ? 'buy' : 'sell',
+        qty: tradeQty,
+        funderAddress: baseBurner.address,
+      })
+
+      addTradeLog('success', `Definitive Quote received! Quote ID: ${truncateHash(quote.quoteId, 6)} (Est. Output: ${quote.to.amount} ${side === 'BUY' ? 'WETH' : 'USDC'})`)
+
+      // Step 1: Seal Sequential Promise on Arkiv Rabdi Testnet
+      setStepMessage('Sealing sequential trade promise on Arkiv Rabdi testnet...')
+      addTradeLog('info', `Sealing Trade Promise on Arkiv Rabdi Testnet...`)
+
+      const tradePayload = {
+        symbol: 'WETH/USDC',
+        side,
+        orderType: 'MARKET',
+        limit: Number(limit) || 3000,
+        amount: Number(tradeQty),
+        stopLoss: Number(stopLoss) || 2800,
+        target: Number(target) || 3350,
+        burnerAccountAddress: baseBurner.address,
+        network: 'BASE_MAINNET',
+        definitiveQuoteId: quote.quoteId,
+      }
+
+      const promiseRes = await api.post('/api/trades/promise', tradePayload)
+      if (!promiseRes.data?.success) {
+        throw new Error(promiseRes.data?.error || 'Failed to seal trade promise on Arkiv')
+      }
+
+      const pData = {
+        promiseId: promiseRes.data.promiseId,
+        payloadHash: promiseRes.data.payloadHash,
+        tradeIndex: promiseRes.data.tradeIndex || 1,
+        arkivEntityKey: promiseRes.data.arkivEntityKey,
+      }
+      setPromiseData(pData)
+
+      if (pData.arkivEntityKey) {
+        addTradeLog(
+          'success',
+          `Trade #${pData.tradeIndex} Promise sealed on Arkiv (Key: ${truncateHash(pData.arkivEntityKey, 6)})`,
+          { label: 'Rabdi Explorer', url: `https://rabdi.explorer.arkiv.network/entity/${pData.arkivEntityKey}` }
+        )
+      } else {
+        addTradeLog('success', `Trade #${pData.tradeIndex} Promise sealed in ArkDB (30-day epoch)`)
+      }
+
+      // Step 2: Prepare Burner (Wrap & Approve if needed)
+      setStep('executing_onchain')
+      setStepMessage('Preparing burner (checking WETH wrap & Flash allowance)...')
+      addTradeLog('onchain', `Preparing burner ${truncateHash(baseBurner.address, 6)} on Base Mainnet...`)
+
+      const requiredWei = parseUnits(tradeQty, 18)
+      const prep = await prepareBurnerForDefinitiveTrade(
+        baseBurner.privateKey,
+        targetAsset,
+        requiredWei
+      )
+      if (prep.wrapped) {
+        addTradeLog('onchain', `Wrapped ${formatEther(prep.wrapped)} ETH to WETH on Base Mainnet.`)
+      }
+      if (prep.approved) {
+        addTradeLog('onchain', `Approved WETH to Definitive Flash Allowance contract (0x5d00...8f78).`)
+      }
+
+      // Step 3: Sign EIP-712 Order Typed Data ($0 gas)
+      setStepMessage('Signing EIP-712 FlashOrder with burner key...')
+      addTradeLog('info', `Signing EIP-712 FlashOrder offchain ($0 gas)...`)
+      const signature = await signDefinitiveOrder(baseBurner.privateKey, quote.evm.orderTypedData)
+      addTradeLog('success', `EIP-712 order signed by burner!`)
+
+      // Step 4: Submit Order to Definitive Solvers
+      setStepMessage('Submitting order to Definitive Flash Solvers on Base Mainnet...')
+      addTradeLog('info', `Broadcasting order to Definitive Flash Solvers...`)
+      const orderRes = await submitDefinitiveOrder({
+        targetAsset,
+        contraAsset,
+        side: side === 'BUY' ? 'buy' : 'sell',
+        qty: tradeQty,
+        funderAddress: baseBurner.address,
+        userSignature: signature,
+        evmOrderTypedData: quote.evm.orderTypedData,
+      })
+
+      addTradeLog('success', `Definitive Flash Order Submitted! Status: ${orderRes.status || 'SUBMITTED'}`)
+
+      // Step 5: Record Execution & Dispatch Signals to Followers
+      setStep('signaling')
+      setStepMessage('Recording fill and encrypting signals for followers...')
+      const executionTxHash = orderRes.txHash || `def_${orderRes.orderId || quote.quoteId}`
+
+      const [execRes, signalRes] = await Promise.all([
+        api.post('/api/trades/execute', {
+          ...tradePayload,
+          tradeIndex: pData.tradeIndex,
+          payloadHash: pData.payloadHash,
+          promiseId: pData.promiseId,
+          executionTxHash,
+          network: 'BASE_MAINNET',
+          definitiveOrderId: orderRes.orderId || quote.quoteId,
+          definitiveQuoteId: quote.quoteId,
+          isCopyTrade: false,
+        }),
+        api.post('/api/trades/signal', {
+          ...tradePayload,
+          tradeIndex: pData.tradeIndex,
+          payloadHash: pData.payloadHash,
+          promiseId: pData.promiseId,
+          network: 'BASE_MAINNET',
+          definitiveOrderId: orderRes.orderId || quote.quoteId,
+          definitiveQuoteId: quote.quoteId,
+        }),
+      ])
+
+      if (execRes.data?.success) {
+        setExecutionResult({
+          tradeId: execRes.data.tradeId,
+          executionTxHash,
+        })
+        addTradeLog('success', `Base Mainnet order recorded in protocol state!`)
+      }
+
+      if (signalRes.data?.success) {
+        setSignalResult({
+          followersNotified: signalRes.data.followersNotified || 0,
+          signals: signalRes.data.signals || [],
+        })
+        addTradeLog('success', `Dispatched Base Mainnet signal to ${signalRes.data.followersNotified || 0} followers via WebSockets & ArkDB!`)
+      }
+
+      setStep('completed')
+      setStepMessage('Trade successfully executed on Base Mainnet and promised on Arkiv!')
+      await loadBaseBalances()
+    } catch (err: unknown) {
+      const e = err as Error
+      setErrorMessage(e.message || 'Base Mainnet trade execution failed.')
+      addTradeLog('warn', `Error: ${e.message}`)
+      setStep('error')
+    } finally {
+      submittingRef.current = false
+      setIsSubmitting(false)
+    }
+  }
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
     setCopiedKey(id)
@@ -250,6 +571,10 @@ export default function LeaderTerminalPage() {
   // 3. Trigger simultaneous Execution record & Follower Encrypted Signals (10-min Arkiv TTL)
   const handlePlaceOrderAndSignal = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (networkMode === 'BASE_MAINNET') {
+      await executeBaseMainnetLeaderFlow(e)
+      return
+    }
     if (!scope || !navigator.locks) { setErrorMessage('Link your wallet and use a browser with Web Locks support.'); return }
     await navigator.locks.request(`${scopeKey(scope)}:leader-execution`, { mode: 'exclusive', ifAvailable: true }, async lock => {
       if (!lock) { setErrorMessage('This leader trade is already running in another tab.'); return }
@@ -271,7 +596,7 @@ export default function LeaderTerminalPage() {
       setErrorMessage(null)
       setTradeLogs([])
       setStep('funding')
-      setStepMessage('Checking shielded funds and creating a local burner…')
+      setStepMessage('Checking shielded funds and creating a local burnerâ¦')
 
       const funding = await import('@/lib/shielded/tradeFunding')
       const currentScope = { userId: user.id, walletAddress: user.walletAddress }
@@ -293,7 +618,7 @@ export default function LeaderTerminalPage() {
       setFundingEvidence({ operation: burner.userOpHash, transaction: burner.fundingTxHash })
       addTradeLog('success', `Burner ${burner.address} funded through Pimlico.`, burner.fundingTxHash ? { label: 'Funding receipt', url: `https://sepolia.etherscan.io/tx/${burner.fundingTxHash}` } : undefined)
       setStep('promising')
-      setStepMessage('Funding confirmed. Sealing the trade promise…')
+      setStepMessage('Funding confirmed. Sealing the trade promiseâ¦')
 
       const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
       const wethPos = 0.001
@@ -367,7 +692,7 @@ export default function LeaderTerminalPage() {
 
       // Step 2: Real Onchain Execution on Ethereum Sepolia
       setStep('executing_onchain')
-      setStepMessage('Executing real onchain two-leg swap (USDC ↔ WETH) on Ethereum Sepolia...')
+      setStepMessage('Executing real onchain two-leg swap (USDC â WETH) on Ethereum Sepolia...')
       addTradeLog('onchain', `Executing two-leg transfer demo on Ethereum Sepolia via burner ${truncateHash(burner.address, 6)}...`)
       funding.assertTradeScope(currentScope)
       burner.stage = 'entry-pending'
@@ -591,30 +916,201 @@ export default function LeaderTerminalPage() {
           </div>
         </div>
 
-        <Card>
-          <CardHeader><CardTitle>Your shielded trading balance</CardTitle><CardDescription>Ethereum Sepolia · USDC capital and WETH for withdrawal fees and the burner's native gas reserve.</CardDescription></CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
-              <p className="text-sm font-semibold">Proof files · {proofReady ? 'Ready' : proofPreparing ? 'Preparing' : 'Preparation required'}</p>
-              <p role="status" aria-live="polite" className="text-xs text-text-secondary">{proofMessage}</p>
-              {!proofReady && <button type="button" onClick={() => void prepareProofFiles()} disabled={proofPreparing || isSubmitting} className="text-xs text-accent disabled:opacity-50">{proofPreparing ? 'Preparing…' : `Prepare proof files (${(artifactTotalBytes / 1048576).toFixed(0)} MiB, once)`}</button>}
-              <p className="text-xs text-text-muted">Public proving files are served by this app and saved in your browser. Keep this page open during preparation. They contain no wallet secrets.</p>
+        {/* Network Mode Switcher Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-border bg-surface-raised">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-[#0052FF]/15 flex items-center justify-center text-[#0052FF]">
+              <Globe className="w-5 h-5" />
             </div>
-            <div className="flex flex-wrap gap-6 items-center">
-              {['USDC', 'WETH'].map(token => <div key={token}><p className="text-xs text-text-muted">Private {token}</p><p className="mono tnum text-lg">{privateView?.balances.find(b => b.symbol === token)?.amount ?? '—'}</p></div>)}
-              <button type="button" disabled={poolLoading || isSubmitting} onClick={() => void refreshPrivate(true)} className="text-accent text-xs disabled:opacity-50">{poolLoading ? 'Synchronizing notes…' : 'Refresh private balance'}</button>
-              <Link to="/" className="text-accent text-xs underline">Top up on dashboard</Link>
+            <div>
+              <div className="text-sm font-bold text-text-primary flex items-center gap-2">
+                <span>Execution Network:</span>
+                {networkMode === 'BASE_MAINNET' ? (
+                  <Badge className="bg-[#0052FF]/20 text-[#0052FF] border-[#0052FF]/40 text-xs">
+                    🔵 Base Mainnet (Definitive Flash)
+                  </Badge>
+                ) : (
+                  <Badge variant="muted" className="text-text-muted text-xs">
+                    Ethereum Sepolia (Simulation Pool)
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-text-secondary mt-0.5">
+                {networkMode === 'BASE_MAINNET'
+                  ? 'Live institutional routing through Definitive Flash solver contracts on Base Mainnet. Promises seal on Arkiv Rabdi.'
+                  : 'Simulates atomic swap counterparty via FlashTradePool contract on Ethereum Sepolia.'}
+              </p>
             </div>
-            {privateView && <p className="text-xs text-text-muted">Last synchronized: {new Date(privateView.syncedAt).toLocaleString()}{poolLoading ? ' · Updating in background…' : ''}. Funding always rechecks spendable notes.</p>}
-            {fundingQuote && <p className="text-xs text-text-secondary">Estimated requirement: {(Number(fundingQuote.grossUsdc) / 1e6).toFixed(6)} USDC + {formatEther(BigInt(fundingQuote.requiredWeth))} WETH. Includes {formatEther(BigInt(fundingQuote.nativeReserve))} ETH for entry/exit gas and a {formatEther(BigInt(fundingQuote.feeReserve))} WETH withdrawal reserve. Pimlico checks the operation estimate before submission.</p>}
-            {shortfall && <p role="alert" className="rounded-md p-3 border border-semantic-warning/40 text-semantic-warning text-sm">{shortfall} <Link to="/" className="underline">Please top up.</Link></p>}
-            {poolError && <p role="alert" className="text-semantic-warning text-xs">{poolError}</p>}
-            {rpcStatus && <p role="status" className="text-semantic-warning text-xs">{rpcStatus}</p>}
-            <p className="text-xs text-text-muted">On submit, a fresh burner is saved locally, signs its own funding UserOperation and receives funds through Pimlico. The promise is created after funding confirmation. Gas reserves are estimates; unused funds remain in the burner.</p>
-            {fundingEvidence.operation && <p className="mono text-xs break-all">Funding UserOperation: {fundingEvidence.operation}</p>}
-            {fundingEvidence.transaction && <a href={`https://sepolia.etherscan.io/tx/${fundingEvidence.transaction}`} target="_blank" rel="noopener noreferrer" className="text-accent text-xs underline">View confirmed funding transaction</a>}
-          </CardContent>
-        </Card>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-surface p-1 rounded-lg border border-border self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setNetworkMode('BASE_MAINNET')
+                setSymbol('WETH/USDC')
+                setAmount('0.0001')
+              }}
+              className={`px-3.5 py-2 rounded-md text-xs font-bold transition-all ${
+                networkMode === 'BASE_MAINNET'
+                  ? 'bg-[#0052FF] text-white shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              🔵 Base Mainnet
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setNetworkMode('SEPOLIA_TESTNET')
+                setSymbol('ETH/USDC')
+                setAmount('3.00')
+              }}
+              className={`px-3.5 py-2 rounded-md text-xs font-bold transition-all ${
+                networkMode === 'SEPOLIA_TESTNET'
+                  ? 'bg-accent text-text-inverse shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Sepolia Testnet
+            </button>
+          </div>
+        </div>
+
+        {networkMode === 'BASE_MAINNET' ? (
+          <Card className="border-[#0052FF]/30 bg-gradient-to-br from-[#0052FF]/5 via-surface to-surface">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#0052FF] animate-pulse" />
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <span>Base Mainnet Ephemeral Burner</span>
+                    <Badge className="bg-[#0052FF]/20 text-[#0052FF] border-[#0052FF]/40 text-[10px]">
+                      Definitive Flash Ready
+                    </Badge>
+                  </CardTitle>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadBaseBalances}
+                  disabled={isLoadingBaseBalances}
+                  className="text-[11px] font-semibold text-accent hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoadingBaseBalances ? 'animate-spin' : ''}`} />
+                  <span>{isLoadingBaseBalances ? 'Refreshing...' : 'Refresh'}</span>
+                </button>
+              </div>
+              <CardDescription className="text-xs">
+                Local ephemeral burner keypair signing $0-gas EIP-712 orders submitted directly to Definitive Flash solvers on Base Mainnet.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-raised border border-border">
+                <div className="flex items-center gap-2 text-xs">
+                  <Key className="w-3.5 h-3.5 text-accent" />
+                  <span className="text-text-muted">Burner Address:</span>
+                  <span className="mono font-bold text-text-primary">{truncateHash(baseBurner.address, 6)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(baseBurner.address, 'base-burner')}
+                    className="p-1 rounded hover:bg-surface text-text-muted hover:text-text-primary transition-colors"
+                    title="Copy Burner Address"
+                  >
+                    {copiedKey === 'base-burner' ? <Check className="w-3.5 h-3.5 text-semantic-success" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                  <a
+                    href={`${BASE_MAINNET_EXPLORER}/address/${baseBurner.address}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1 rounded hover:bg-surface text-text-muted hover:text-accent transition-colors"
+                    title="View on BaseScan"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <div className="p-3 rounded-lg bg-surface border border-border">
+                  <div className="text-[10px] text-text-muted uppercase font-semibold">Base ETH Balance</div>
+                  <div className="mono tnum text-base font-extrabold text-[#0052FF]">
+                    {baseBalances ? `${baseBalances.eth} ETH` : 'Loading...'}
+                  </div>
+                  <div className="text-[10px] text-text-muted">Trade Capital & Gas</div>
+                </div>
+                <div className="p-3 rounded-lg bg-surface border border-border">
+                  <div className="text-[10px] text-text-muted uppercase font-semibold">Base USDC Balance</div>
+                  <div className="mono tnum text-base font-extrabold text-accent">
+                    {baseBalances ? `$${baseBalances.usdc} USDC` : 'Loading...'}
+                  </div>
+                  <div className="text-[10px] text-text-muted">Native Base USDC</div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Button
+                  type="button"
+                  onClick={() => setFundModalOpen(true)}
+                  className="flex-1 py-2 text-xs font-bold bg-[#0052FF] hover:bg-[#0045d8] text-white flex items-center justify-center gap-1.5"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>Fund Burner from MetaMask</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSweepBaseBurner}
+                  disabled={isSweepingBurner || !baseBalances || baseBalances.ethRaw === 0n}
+                  className="py-2 text-xs font-semibold flex items-center gap-1.5 border-border hover:border-semantic-warning hover:text-semantic-warning"
+                  title="Sweep residual ETH from the burner back to your primary MetaMask wallet"
+                >
+                  {isSweepingBurner ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRightLeft className="w-3.5 h-3.5" />}
+                  <span>Sweep Funds to Main</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleRotateBaseBurner}
+                  className="py-2 px-2.5 text-xs text-text-muted hover:text-text-primary"
+                  title="Mint fresh burner keypair"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader><CardTitle>Your shielded trading balance</CardTitle><CardDescription>Ethereum Sepolia · USDC capital and WETH for withdrawal fees and the burner's native gas reserve.</CardDescription></CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
+                <p className="text-sm font-semibold">Proof files · {proofReady ? 'Ready' : proofPreparing ? 'Preparing' : 'Preparation required'}</p>
+                <p role="status" aria-live="polite" className="text-xs text-text-secondary">{proofMessage}</p>
+                {!proofReady && <button type="button" onClick={() => void prepareProofFiles()} disabled={proofPreparing || isSubmitting} className="text-xs text-accent disabled:opacity-50">{proofPreparing ? 'Preparing…' : `Prepare proof files (${(artifactTotalBytes / 1048576).toFixed(0)} MiB, once)`}</button>}
+                <p className="text-xs text-text-muted">Public proving files are served by this app and saved in your browser. Keep this page open during preparation. They contain no wallet secrets.</p>
+              </div>
+              <div className="flex flex-wrap gap-6 items-center">
+                {['USDC', 'WETH'].map(token => <div key={token}><p className="text-xs text-text-muted">Private {token}</p><p className="mono tnum text-lg">{privateView?.balances.find(b => b.symbol === token)?.amount ?? '—'}</p></div>)}
+                <button type="button" disabled={poolLoading || isSubmitting} onClick={() => void refreshPrivate(true)} className="text-accent text-xs disabled:opacity-50">{poolLoading ? 'Synchronizing notes…' : 'Refresh private balance'}</button>
+                <Link to="/" className="text-accent text-xs underline">Top up on dashboard</Link>
+              </div>
+              {privateView && <p className="text-xs text-text-muted">Last synchronized: {new Date(privateView.syncedAt).toLocaleString()}{poolLoading ? ' · Updating in background…' : ''}. Funding always rechecks spendable notes.</p>}
+              {fundingQuote && <p className="text-xs text-text-secondary">Estimated requirement: {(Number(fundingQuote.grossUsdc) / 1e6).toFixed(6)} USDC + {formatEther(BigInt(fundingQuote.requiredWeth))} WETH. Includes {formatEther(BigInt(fundingQuote.nativeReserve))} ETH for entry/exit gas and a {formatEther(BigInt(fundingQuote.feeReserve))} WETH withdrawal reserve. Pimlico checks the operation estimate before submission.</p>}
+              {shortfall && <p role="alert" className="rounded-md p-3 border border-semantic-warning/40 text-semantic-warning text-sm">{shortfall} <Link to="/" className="underline">Please top up.</Link></p>}
+              {poolError && <p role="alert" className="text-semantic-warning text-xs">{poolError}</p>}
+              {rpcStatus && <p role="status" className="text-semantic-warning text-xs">{rpcStatus}</p>}
+              <p className="text-xs text-text-muted">On submit, a fresh burner is saved locally, signs its own funding UserOperation and receives funds through Pimlico. The promise is created after funding confirmation. Gas reserves are estimates; unused funds remain in the burner.</p>
+              {fundingEvidence.operation && <p className="mono text-xs break-all">Funding UserOperation: {fundingEvidence.operation}</p>}
+              {fundingEvidence.transaction && <a href={`https://sepolia.etherscan.io/tx/${fundingEvidence.transaction}`} target="_blank" rel="noopener noreferrer" className="text-accent text-xs underline">View confirmed funding transaction</a>}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Two-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
@@ -680,7 +1176,7 @@ export default function LeaderTerminalPage() {
                   <div className="text-[10px] text-text-muted flex justify-between items-center pt-1 px-1 border-t border-border/60">
                     <span>FlashTradePool Vault Reserves:</span>
                     <span className="mono font-semibold text-text-secondary">
-                      {vaultBalances ? `$${parseFloat(vaultBalances.usdc).toFixed(2)} USDC • ${parseFloat(vaultBalances.weth).toFixed(4)} WETH` : 'Loading...'}
+                      {vaultBalances ? `$${parseFloat(vaultBalances.usdc).toFixed(2)} USDC â¢ ${parseFloat(vaultBalances.weth).toFixed(4)} WETH` : 'Loading...'}
                     </span>
                   </div>
                 </div>
@@ -848,7 +1344,7 @@ export default function LeaderTerminalPage() {
                       </p>
                     </div>
                     <div className="rounded-md bg-surface-raised border border-border px-3.5 py-3 space-y-2" role="status" aria-live="polite">
-                      <p className="text-xs text-text-secondary">{burnerAddress ? 'This trade’s burner was created and saved on this device.' : 'A new burner will be created automatically when you submit this trade. Its address will appear here.'}</p>
+                      <p className="text-xs text-text-secondary">{burnerAddress ? 'This tradeâs burner was created and saved on this device.' : 'A new burner will be created automatically when you submit this trade. Its address will appear here.'}</p>
                       {burnerAddress && <p className="mono tnum text-xs text-accent break-all select-all">{burnerAddress}</p>}
                     </div>
                   </div>
@@ -862,13 +1358,33 @@ export default function LeaderTerminalPage() {
                   {/* Action Button */}
                   <button
                     type="submit"
-                    disabled={isSubmitting || !user?.walletAddress || (!proofReady && !burnerRef.current?.userOpHash && !burnerRef.current?.signedOperation) || (!burnerRef.current && (!privateView || !fundingQuote || !!shortfall))}
-                    className="w-full py-3.5 px-4 rounded-md font-bold text-xs text-text-inverse bg-accent hover:bg-[#d4f885] active:translate-y-0 transition-all duration-fast flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_14px_rgba(198,243,106,0.2)]"
+                    disabled={
+                      isSubmitting ||
+                      !user?.walletAddress ||
+                      (networkMode === 'BASE_MAINNET'
+                        ? !baseBalances || (baseBalances.ethRaw === 0n && baseBalances.usdcRaw === 0n)
+                        : (!proofReady && !burnerRef.current?.userOpHash && !burnerRef.current?.signedOperation) ||
+                          (!burnerRef.current && (!privateView || !fundingQuote || !!shortfall)))
+                    }
+                    className={`w-full py-3.5 px-4 rounded-md font-bold text-xs transition-all duration-fast flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      networkMode === 'BASE_MAINNET'
+                        ? 'bg-[#0052FF] hover:bg-[#0045d8] text-white shadow-[0_2px_14px_rgba(0,82,255,0.25)]'
+                        : 'bg-accent hover:bg-[#d4f885] text-text-inverse shadow-[0_2px_14px_rgba(198,243,106,0.2)]'
+                    }`}
                   >
                     {isSubmitting ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin text-text-inverse" />
-                        <span>{stepMessage || 'Executing Real Onchain Swap & Dispatching Signals...'}</span>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>{stepMessage || 'Executing Flash Trade...'}</span>
+                      </>
+                    ) : networkMode === 'BASE_MAINNET' ? (
+                      <>
+                        <Zap className="w-4 h-4 fill-current stroke-[2.2]" />
+                        <span>
+                          {baseBalances && baseBalances.ethRaw > 0n
+                            ? `Commit Promise & Execute Flash Trade (${amount || '0.0001'} WETH)`
+                            : 'Fund Burner with Base ETH to Trade'}
+                        </span>
                       </>
                     ) : (
                       <>
@@ -1046,7 +1562,7 @@ export default function LeaderTerminalPage() {
 
                   {onchainResult && <div className="p-3.5 rounded-md bg-surface-raised border border-border space-y-2 text-sm">
                     <p className="font-semibold">Position & realized result</p>
-                    <p>Entry: {onchainResult.usdcAmount} USDC � Position: {onchainResult.wethAmount} WETH</p>
+                    <p>Entry: {onchainResult.usdcAmount} USDC · Position: {onchainResult.wethAmount} WETH</p>
                     {exitResult ? <><p>Confirmed payout: {exitResult.usdcAmount} USDC</p><p>Realized P/L: {(Number(exitResult.usdcAmount) - Number(onchainResult.usdcAmount)).toFixed(6)} USDC before native gas.</p></> : <p className="text-text-muted">Position open. Live unrealized P/L is unavailable.</p>}
                     <Link to="/history" className="text-accent underline text-xs">Full receipts, gas and promise claim</Link>
                   </div>}
@@ -1180,7 +1696,7 @@ export default function LeaderTerminalPage() {
                     {exitResult && (
                       <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-zinc-950 dark:text-zinc-100 space-y-1.5 shadow-sm">
                         <div className="text-[11px] font-black text-emerald-900 dark:text-emerald-300 flex items-center justify-between">
-                          <span>✅ Exit Settlement Confirmed Onchain!</span>
+                          <span>â Exit Settlement Confirmed Onchain!</span>
                           <span className="mono tnum text-[10px] font-bold">Block #{exitResult.blockNumber}</span>
                         </div>
                         <div className="flex justify-between items-center text-[12px]">
@@ -1225,7 +1741,112 @@ export default function LeaderTerminalPage() {
 
         </div>
       </div>
+      {/* Fund Base Burner Modal */}
+      {fundModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-md p-6 rounded-xl bg-surface border border-border shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#0052FF]/20 flex items-center justify-center text-[#0052FF]">
+                  <Wallet className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-text-primary">Fund Base Mainnet Burner</h3>
+                  <p className="text-[11px] text-text-secondary">Direct MetaMask deposit to your local burner</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFundModalOpen(false)}
+                className="text-text-muted hover:text-text-primary p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-lg bg-surface-raised border border-border text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-text-muted">Funding From (Connected Wallet):</span>
+                <span className="mono font-semibold text-text-primary">{truncateHash(user?.walletAddress, 6)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Target Ephemeral Burner:</span>
+                <span className="mono font-semibold text-accent">{truncateHash(baseBurner.address, 6)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Network:</span>
+                <span className="font-semibold text-[#0052FF]">Base Mainnet (Chain ID 8453)</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-text-muted uppercase mb-1.5">
+                Funding Presets (ETH)
+              </label>
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                {['0.0002', '0.0005', '0.001'].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setFundAmount(val)}
+                    className={`py-2 rounded-md text-xs font-bold border transition-all ${
+                      fundAmount === val
+                        ? 'bg-[#0052FF] text-white border-[#0052FF]'
+                        : 'bg-surface-raised border-border text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    {val} ETH
+                  </button>
+                ))}
+              </div>
+              <input
+                type="number"
+                step="0.0001"
+                min="0.0001"
+                max="0.01"
+                value={fundAmount}
+                onChange={(e) => setFundAmount(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-surface-raised border border-border text-sm mono font-bold text-text-primary focus:border-[#0052FF] outline-none"
+                placeholder="Custom ETH amount"
+              />
+              <p className="text-[10px] text-text-muted mt-1.5">
+                Micro-capital safety preset. You can sweep residual burner balance back to your main account anytime.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setFundModalOpen(false)}
+                className="flex-1 py-2 text-xs font-semibold"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={isFundingBurner || !fundAmount}
+                onClick={handleFundBaseBurner}
+                className="flex-1 py-2 text-xs font-bold bg-[#0052FF] hover:bg-[#0045d8] text-white flex items-center justify-center gap-1.5"
+              >
+                {isFundingBurner ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Confirming on Base...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span>Send {fundAmount} ETH</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
 

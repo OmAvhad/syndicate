@@ -22,6 +22,9 @@ export interface TradeSignalItem {
   expiresAt: string
   createdAt: string
   remainingSeconds: number
+  network?: 'SEPOLIA_TESTNET' | 'BASE_MAINNET'
+  definitiveQuoteId?: string | null
+  definitiveOrderId?: string | null
   requiresMetaMaskDecrypt?: boolean
   encryptedPayloadHex?: string | null
   isDecrypted?: boolean
@@ -327,6 +330,9 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
         target: target.target,
         burnerAccountAddress: burner,
         tradeIndex: target.tradeIndex || 1,
+        network: target.network || 'SEPOLIA_TESTNET',
+        definitiveQuoteId: target.definitiveQuoteId || null,
+        definitiveOrderId: target.definitiveOrderId || null,
         isCopyTrade: true,
         originalSignalId: target.signalId,
         executionTxHash: executionTxHash || undefined,

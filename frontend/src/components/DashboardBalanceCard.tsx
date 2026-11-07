@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge'
 import WalletConnectButton from '@/components/WalletConnectButton'
 import { truncateHash } from '@/lib/utils'
 import { publicClient, USDC_SEPOLIA, ERC20_ABI, LEADER_BURNER_ADDRESS, FOLLOWER_BURNER_ADDRESS } from '@/lib/flashEngine'
+import { getOrCreateBaseBurner, fetchBaseMainnetBalances, BASE_MAINNET_EXPLORER } from '@/lib/baseBurner'
 import { readCachedBalance } from '@/lib/shielded/balanceCache'
 import { formatEther, formatUnits, type Address } from 'viem'
 import {
@@ -20,6 +21,7 @@ import {
   Coins,
   Radio,
   Lock,
+  Globe,
 } from 'lucide-react'
 
 interface DashboardBalanceCardProps {
@@ -30,7 +32,12 @@ interface DashboardBalanceCardProps {
 export default function DashboardBalanceCard({ userId, walletAddress }: DashboardBalanceCardProps) {
   const [loading, setLoading] = useState(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
-  const [activeBurnerRole, setActiveBurnerRole] = useState<'leader' | 'follower'>('leader')
+  const [activeBurnerRole, setActiveBurnerRole] = useState<'base' | 'leader' | 'follower'>('base')
+
+  // Base Mainnet Burner
+  const [baseBurner] = useState(() => getOrCreateBaseBurner())
+  const [baseBurnerBal, setBaseBurnerBal] = useState<{ eth: string; usdc: string } | null>(null)
+  const [baseMainBal, setBaseMainBal] = useState<{ eth: string; usdc: string } | null>(null)
 
   // MetaMask balances on Sepolia
   const [metaEth, setMetaEth] = useState<string | null>(null)
@@ -55,7 +62,15 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
   const loadBalances = useCallback(async () => {
     setLoading(true)
     try {
-      // 1. Fetch burner balances
+      // 0. Fetch Base Mainnet balances
+      const [bBurner, bMain] = await Promise.all([
+        fetchBaseMainnetBalances(baseBurner.address).catch(() => null),
+        walletAddress ? fetchBaseMainnetBalances(walletAddress as Address).catch(() => null) : null,
+      ])
+      if (bBurner) setBaseBurnerBal(bBurner)
+      if (bMain) setBaseMainBal(bMain)
+
+      // 1. Fetch burner balances on Sepolia
       const [lEth, lUsdc, fEth, fUsdc] = await Promise.all([
         publicClient.getBalance({ address: LEADER_BURNER_ADDRESS as Address }).catch(() => null),
         publicClient.readContract({
@@ -216,11 +231,17 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
 
                   <div className="p-2.5 rounded bg-surface-raised border border-border space-y-1.5">
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-text-muted">Native ETH:</span>
+                      <span className="text-text-muted">Sepolia ETH:</span>
                       <span className="mono tnum font-bold text-text-primary">{metaEth ?? '0.0000'} ETH</span>
                     </div>
+                    {baseMainBal && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-text-muted">Base Mainnet ETH:</span>
+                        <span className="mono tnum font-extrabold text-[#0052FF]">{baseMainBal.eth} ETH</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-text-muted">USDC Balance:</span>
+                      <span className="text-text-muted">Sepolia USDC:</span>
                       <span className="mono tnum font-extrabold text-accent">{metaUsdc ? `$${metaUsdc}` : '$0.00'}</span>
                     </div>
                   </div>
@@ -294,6 +315,15 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
                 <div className="flex items-center rounded bg-surface-raised border border-border p-0.5 text-[10px]">
                   <button
                     type="button"
+                    onClick={() => setActiveBurnerRole('base')}
+                    className={`px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors ${
+                      activeBurnerRole === 'base' ? 'bg-[#0052FF] text-white' : 'text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    Base
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setActiveBurnerRole('leader')}
                     className={`px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors ${
                       activeBurnerRole === 'leader' ? 'bg-accent text-text-inverse' : 'text-text-muted hover:text-text-primary'
@@ -318,13 +348,24 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
                   <span className="text-text-muted">Burner Address:</span>
                   <div className="flex items-center gap-1">
                     <span className="mono tnum text-[11px] font-bold text-text-primary">
-                      {truncateHash(activeBurnerRole === 'leader' ? LEADER_BURNER_ADDRESS : FOLLOWER_BURNER_ADDRESS, 6)}
+                      {truncateHash(
+                        activeBurnerRole === 'base'
+                          ? baseBurner.address
+                          : activeBurnerRole === 'leader'
+                          ? LEADER_BURNER_ADDRESS
+                          : FOLLOWER_BURNER_ADDRESS,
+                        6
+                      )}
                     </span>
                     <button
                       type="button"
                       onClick={() =>
                         copyToClipboard(
-                          activeBurnerRole === 'leader' ? LEADER_BURNER_ADDRESS : FOLLOWER_BURNER_ADDRESS,
+                          activeBurnerRole === 'base'
+                            ? baseBurner.address
+                            : activeBurnerRole === 'leader'
+                            ? LEADER_BURNER_ADDRESS
+                            : FOLLOWER_BURNER_ADDRESS,
                           'burner-addr'
                         )
                       }
@@ -333,11 +374,15 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
                       {copiedKey === 'burner-addr' ? <Check className="w-2.5 h-2.5 text-semantic-success" /> : <Copy className="w-2.5 h-2.5" />}
                     </button>
                     <a
-                      href={`https://sepolia.etherscan.io/address/${activeBurnerRole === 'leader' ? LEADER_BURNER_ADDRESS : FOLLOWER_BURNER_ADDRESS}`}
+                      href={
+                        activeBurnerRole === 'base'
+                          ? `${BASE_MAINNET_EXPLORER}/address/${baseBurner.address}`
+                          : `https://sepolia.etherscan.io/address/${activeBurnerRole === 'leader' ? LEADER_BURNER_ADDRESS : FOLLOWER_BURNER_ADDRESS}`
+                      }
                       target="_blank"
                       rel="noreferrer"
                       className="text-text-muted hover:text-text-primary p-0.5"
-                      title="View on Etherscan"
+                      title={activeBurnerRole === 'base' ? 'View on BaseScan' : 'View on Etherscan'}
                     >
                       <ExternalLink className="w-2.5 h-2.5" />
                     </a>
@@ -346,15 +391,23 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
 
                 <div className="p-2.5 rounded bg-surface-raised border border-border space-y-1.5">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="text-text-muted">Gas Reserve (ETH):</span>
+                    <span className="text-text-muted">{activeBurnerRole === 'base' ? 'Base ETH:' : 'Gas Reserve (ETH):'}</span>
                     <span className="mono tnum font-bold text-text-primary">
-                      {activeBurnerRole === 'leader' ? `${leaderEth} ETH` : `${followerEth} ETH`}
+                      {activeBurnerRole === 'base'
+                        ? `${baseBurnerBal?.eth ?? '0.0000'} ETH`
+                        : activeBurnerRole === 'leader'
+                        ? `${leaderEth} ETH`
+                        : `${followerEth} ETH`}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-xs">
-                    <span className="text-text-muted">Trading Capital:</span>
+                    <span className="text-text-muted">{activeBurnerRole === 'base' ? 'Base USDC:' : 'Trading Capital:'}</span>
                     <span className="mono tnum font-extrabold text-accent">
-                      {activeBurnerRole === 'leader' ? `$${leaderUsdc} USDC` : `$${followerUsdc} USDC`}
+                      {activeBurnerRole === 'base'
+                        ? `$${baseBurnerBal?.usdc ?? '0.00'} USDC`
+                        : activeBurnerRole === 'leader'
+                        ? `$${leaderUsdc} USDC`
+                        : `$${followerUsdc} USDC`}
                     </span>
                   </div>
                 </div>
@@ -362,8 +415,10 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
             </div>
 
             <div className="pt-2 border-t border-border/80 flex items-center justify-between text-[11px] text-text-muted">
-              <span>Burner Mode</span>
-              <span className="text-accent font-semibold">Pre-Funded EIP-712</span>
+              <span>{activeBurnerRole === 'base' ? 'Network' : 'Burner Mode'}</span>
+              <span className="text-accent font-semibold">
+                {activeBurnerRole === 'base' ? 'Base Mainnet (8453)' : 'Pre-Funded EIP-712'}
+              </span>
             </div>
           </CardContent>
         </Card>

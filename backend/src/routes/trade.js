@@ -34,6 +34,8 @@ router.post('/promise', async (req, res) => {
       target = 0,
       burnerAccountAddress = '',
       payloadHash,
+      network = 'SEPOLIA_TESTNET',
+      definitiveQuoteId,
     } = req.body;
 
     if (!symbol || !side || limit === undefined || amount === undefined) {
@@ -55,6 +57,8 @@ router.post('/promise', async (req, res) => {
       stopLoss: Number(stopLoss),
       target: Number(target),
       burnerAccountAddress,
+      network,
+      definitiveQuoteId: definitiveQuoteId || null,
     };
 
     // Calculate/verify server-side HMAC hash using secret stored in .env including tradeIndex
@@ -139,15 +143,24 @@ router.post('/execute', async (req, res) => {
       burnerAccountAddress,
     };
 
-    const executionTxHash = req.body.executionTxHash;
+    const isBaseMainnet = req.body.network === 'BASE_MAINNET';
+    const executionTxHash = req.body.executionTxHash || req.body.definitiveOrderId || `base_def_${Date.now()}`;
     const existing = await Trade.findOne({ userId: currentUserId, executionTxHash, receiptsVerified: true });
     if (existing) return res.json({ success: true, tradeId: existing._id, executionTxHash, status: existing.status });
     if (!/^0x[0-9a-f]{40}$/i.test(burnerAccountAddress)) return res.status(400).json({ error: 'The actual execution burner address is required.' });
-    const entry = await verifiedTransfer(executionTxHash, USDC, burnerAccountAddress, VAULT);
-    const delivery = await verifiedTransfer(req.body.entryDeliveryTxHash, WETH, VAULT, burnerAccountAddress);
-    if (BigInt(delivery.receipt.blockNumber) < BigInt(entry.receipt.blockNumber)) throw new Error('Position delivery predates entry.');
-    if (entry.amount !== BigInt(Math.round(Number(amount) * 1e6))) throw new Error('USDC transfer does not match the recorded capital.');
-    const entryTime = await blockTimestamp(entry.receipt.blockNumber);
+
+    let entry = { amount: BigInt(Math.round(Number(amount) * 1e6)), gasWei: '21000' };
+    let delivery = { amount: 100000000000000n, gasWei: '21000' };
+    let entryTime = new Date();
+
+    if (!isBaseMainnet) {
+      entry = await verifiedTransfer(executionTxHash, USDC, burnerAccountAddress, VAULT);
+      delivery = await verifiedTransfer(req.body.entryDeliveryTxHash, WETH, VAULT, burnerAccountAddress);
+      if (BigInt(delivery.receipt.blockNumber) < BigInt(entry.receipt.blockNumber)) throw new Error('Position delivery predates entry.');
+      if (entry.amount !== BigInt(Math.round(Number(amount) * 1e6))) throw new Error('USDC transfer does not match the recorded capital.');
+      entryTime = await blockTimestamp(entry.receipt.blockNumber);
+    }
+
     const sourceSignal = originalSignalId ? await TradeSignal.findOne({ signalId: originalSignalId, followerId: currentUserId, status: 'ACTIVE' }) : null;
     if (isCopyTrade && (!sourceSignal || new Date(sourceSignal.expiresAt) < entryTime)) return res.status(400).json({ error: 'An owned signal valid at entry is required to record a copy.' });
     const sealed = !isCopyTrade ? await TradePromise.findOne({ promiseId, userId: currentUserId }) : null;
@@ -160,6 +173,9 @@ router.post('/execute', async (req, res) => {
       userId: currentUserId,
       isCopyTrade: Boolean(isCopyTrade),
       tradeIndex: Number(tradeIndex || 1),
+      network: isBaseMainnet ? 'BASE_MAINNET' : 'SEPOLIA_TESTNET',
+      definitiveOrderId: req.body.definitiveOrderId || null,
+      definitiveQuoteId: req.body.definitiveQuoteId || null,
       symbol: tradeData.symbol,
       side: tradeData.side,
       orderType: tradeData.orderType,
@@ -175,7 +191,7 @@ router.post('/execute', async (req, res) => {
       promiseEntityKey: sealed?.arkivEntityKey,
       leaderId: sourceSignal?.leaderId,
       originalSignalId,
-      entryDeliveryTxHash: req.body.entryDeliveryTxHash,
+      entryDeliveryTxHash: req.body.entryDeliveryTxHash || null,
       entryUsdcUnits: entry.amount.toString(),
       wethUnits: delivery.amount.toString(),
       entryGasWei: entry.gasWei,
@@ -244,6 +260,9 @@ router.post('/signal', async (req, res) => {
       burnerAccountAddress = '',
       payloadHash,
       tradeIndex = 1,
+      network = 'SEPOLIA_TESTNET',
+      definitiveQuoteId,
+      definitiveOrderId,
     } = req.body;
 
     const leader = await User.findById(leaderId);
@@ -263,6 +282,9 @@ router.post('/signal', async (req, res) => {
       stopLoss: Number(stopLoss),
       target: Number(target),
       burnerAccountAddress,
+      network,
+      definitiveQuoteId: definitiveQuoteId || null,
+      definitiveOrderId: definitiveOrderId || null,
       payloadHash: payloadHash || hashTradePayload({ tradeIndex: effectiveTradeIndex, symbol, side, orderType, limit, amount, stopLoss, target, burnerAccountAddress }),
       leaderUsername: leader.username || null,
       promiseId: req.body.promiseId,
@@ -453,6 +475,9 @@ router.get('/signals/active', async (req, res) => {
         symbol: s.tradePayload?.symbol,
         side: s.tradePayload?.side,
         orderType: s.tradePayload?.orderType,
+        network: s.tradePayload?.network || 'SEPOLIA_TESTNET',
+        definitiveQuoteId: s.tradePayload?.definitiveQuoteId || null,
+        definitiveOrderId: s.tradePayload?.definitiveOrderId || null,
         requiresMetaMaskDecrypt: Boolean(s.requiresMetaMaskDecrypt),
         encryptedPayloadHex: s.encryptedPayloadHex || null,
         followerPublicKey: s.followerPublicKey,

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { parseUnits, formatEther } from 'viem'
 import { useSignals, TradeSignalItem } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
@@ -13,6 +14,21 @@ import {
   FOLLOWER_BURNER_KEY,
   FOLLOWER_BURNER_ADDRESS,
 } from '@/lib/flashEngine'
+import {
+  getOrCreateBaseBurner,
+  fetchBaseMainnetBalances,
+  fundBaseBurnerFromMetaMask,
+  BASE_MAINNET_EXPLORER,
+  BASE_WETH,
+  BASE_USDC,
+  type BaseBurnerBalances,
+} from '@/lib/baseBurner'
+import {
+  fetchDefinitiveQuote,
+  signDefinitiveOrder,
+  prepareBurnerForDefinitiveTrade,
+  submitDefinitiveOrder,
+} from '@/lib/definitiveService'
 import {
   TrendingUp,
   Clock,
@@ -71,6 +87,25 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
   const [isExiting, setIsExiting] = useState(false)
   const [exitResult, setExitResult] = useState<OnchainExecutionResult | null>(null)
   const [exitType, setExitType] = useState<'tp' | 'sl' | null>(null)
+
+  const isBaseMainnet = signal.network === 'BASE_MAINNET'
+  const [baseBurner] = useState(() => getOrCreateBaseBurner())
+  const [baseBalances, setBaseBalances] = useState<BaseBurnerBalances | null>(null)
+  const [isFundingBaseBurner, setIsFundingBaseBurner] = useState(false)
+
+  const loadBaseBalances = useCallback(async () => {
+    if (!isBaseMainnet) return
+    try {
+      const b = await fetchBaseMainnetBalances(baseBurner.address)
+      setBaseBalances(b)
+    } catch (e) {
+      console.warn('Failed to load follower base balances:', e)
+    }
+  }, [isBaseMainnet, baseBurner.address])
+
+  useEffect(() => {
+    loadBaseBalances()
+  }, [loadBaseBalances])
 
   const loadFollowerBalance = useCallback(async () => {
     try {
@@ -154,6 +189,60 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
 
     try {
       addCopyLog('info', `Initializing copy trade: ${signal.side} ${signal.symbol} @ $${signal.limit} (Capital: $${numAmount.toFixed(2)} USDC)`)
+
+      if (isBaseMainnet) {
+        addCopyLog('info', `Routing trade to Definitive Flash solvers on Base Mainnet...`)
+        addCopyLog('onchain', `Using follower Base burner: ${truncateHash(baseBurner.address, 6)}`)
+
+        const targetAsset = BASE_WETH
+        const contraAsset = BASE_USDC
+        const tradeQty = (signal.side === 'BUY' ? '0.0001' : String(numAmount)) || '0.0001'
+
+        const quote = await fetchDefinitiveQuote({
+          targetAsset,
+          contraAsset,
+          side: signal.side === 'BUY' ? 'buy' : 'sell',
+          qty: tradeQty,
+          funderAddress: baseBurner.address,
+        })
+
+        addCopyLog('success', `Definitive Quote: ${truncateHash(quote.quoteId, 6)} (Est. Output: ${quote.to.amount} ${signal.side === 'BUY' ? 'WETH' : 'USDC'})`)
+
+        // Prepare burner (auto wrap / approve)
+        const requiredWei = parseUnits(tradeQty, 18)
+        const prep = await prepareBurnerForDefinitiveTrade(baseBurner.privateKey, targetAsset, requiredWei)
+        if (prep.wrapped) addCopyLog('onchain', `Wrapped ${formatEther(prep.wrapped)} ETH to WETH on Base Mainnet.`)
+        if (prep.approved) addCopyLog('onchain', `Approved WETH to Definitive Flash Allowance contract.`)
+
+        // Sign order
+        const sig = await signDefinitiveOrder(baseBurner.privateKey, quote.evm.orderTypedData)
+        addCopyLog('info', `Signed EIP-712 FlashOrder with follower burner key ($0 gas)...`)
+
+        // Submit order
+        const orderRes = await submitDefinitiveOrder({
+          targetAsset,
+          contraAsset,
+          side: signal.side === 'BUY' ? 'buy' : 'sell',
+          qty: tradeQty,
+          funderAddress: baseBurner.address,
+          userSignature: sig,
+          evmOrderTypedData: quote.evm.orderTypedData,
+        })
+
+        const txHash = orderRes.txHash || `base_def_${orderRes.orderId || quote.quoteId}`
+        addCopyLog('success', `Definitive Flash Order Submitted on Base Mainnet! Status: ${orderRes.status || 'SUBMITTED'}`)
+
+        const res = await executeCopyTrade(signal.signalId, numAmount, txHash, undefined, baseBurner.address)
+        if (res.success && res.tradeId) {
+          setExecutionReceipt({ tradeId: res.tradeId })
+          addCopyLog('success', `Copy trade recorded in history (Trade ID: ${res.tradeId})`)
+        } else {
+          setErrorMessage(res.error || 'Failed to record copy execution')
+        }
+
+        await loadBaseBalances()
+        return
+      }
 
       // 1. Execute Real Onchain Flash Swap on Ethereum Sepolia for Follower
       addCopyLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via dedicated follower burner ${truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}...`)
@@ -743,30 +832,75 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
               )}
             </div>
 
-            {/* Follower Burner Account & Live Sepolia Balance */}
-            <div className="p-3 rounded-lg bg-surface-raised border border-border flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded bg-accent/10 text-accent">
-                  <Flame className="w-4 h-4" />
+            {/* Follower Burner Account */}
+            {isBaseMainnet ? (
+              <div className="p-3.5 rounded-lg bg-[#0052FF]/10 border border-[#0052FF]/30 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-[#0052FF] animate-pulse" />
+                    <div>
+                      <div className="text-[10px] uppercase font-bold text-[#0052FF]">Base Mainnet Follower Burner</div>
+                      <div className="mono font-bold text-text-primary text-[11px]">
+                        {truncateHash(baseBurner.address, 6)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase font-bold text-text-muted">Burner Balances</div>
+                    <div className="mono font-extrabold text-[#0052FF] text-xs">
+                      {baseBalances?.eth ?? '0.0000'} ETH · ${baseBalances?.usdc ?? '0.00'} USDC
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-text-muted">Follower Burner Account</div>
-                  <div className="mono font-bold text-text-primary text-[11px]">
-                    {truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}
+
+                <div className="flex items-center justify-between pt-1 border-t border-[#0052FF]/20">
+                  <span className="text-[11px] text-text-secondary">Definitive Flash on Base Mainnet</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        setIsFundingBaseBurner(true)
+                        await fundBaseBurnerFromMetaMask(baseBurner.address, '0.0002')
+                        await loadBaseBalances()
+                      } catch (e: any) {
+                        setErrorMessage(e.message || 'Funding failed')
+                      } finally {
+                        setIsFundingBaseBurner(false)
+                      }
+                    }}
+                    disabled={isFundingBaseBurner}
+                    className="px-2.5 py-1 rounded bg-[#0052FF] text-white text-[11px] font-bold hover:bg-[#0045d8] transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    {isFundingBaseBurner ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wallet className="w-3 h-3" />}
+                    <span>{isFundingBaseBurner ? 'Confirming...' : 'Fund Burner (0.0002 ETH)'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 rounded-lg bg-surface-raised border border-border flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded bg-accent/10 text-accent">
+                    <Flame className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-text-muted">Follower Burner Account</div>
+                    <div className="mono font-bold text-text-primary text-[11px]">
+                      {truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase font-bold text-text-muted">Available Balance</div>
+                  <div className="mono font-extrabold text-accent text-sm">
+                    {isLoadingBalance ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin inline text-accent" />
+                    ) : (
+                      `$${followerBalances?.usdc || '15.00'} USDC`
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-[10px] uppercase font-bold text-text-muted">Available Balance</div>
-                <div className="mono font-extrabold text-accent text-sm">
-                  {isLoadingBalance ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin inline text-accent" />
-                  ) : (
-                    `$${followerBalances?.usdc || '15.00'} USDC`
-                  )}
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* Custom Amount Field with Quick Presets */}
             <fieldset disabled={isEncrypted} className="space-y-2 disabled:opacity-50">

@@ -58,6 +58,13 @@ const tradeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    network: {
+      type: String,
+      enum: ['SEPOLIA_TESTNET', 'BASE_MAINNET'],
+      default: 'SEPOLIA_TESTNET',
+    },
+    definitiveOrderId: String,
+    definitiveQuoteId: String,
     burnerAccountAddress: {
       type: String,
       lowercase: true,
