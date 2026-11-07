@@ -32,6 +32,9 @@ export default function ProfilePage() {
     username: user?.username || '',
     bio: user?.bio || '',
     subscriptionFee: user?.subscriptionFee ?? 0.001,
+    riskLevel: (user?.riskLevel as any) || 'MODERATE',
+    tradingStyle: user?.tradingStyle || 'SWING',
+    tags: user?.tags ? user.tags.join(', ') : '',
   })
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -77,6 +80,9 @@ export default function ProfilePage() {
         username: user.username || '',
         bio: user.bio || '',
         subscriptionFee: user.subscriptionFee ?? 0.001,
+        riskLevel: (user?.riskLevel as any) || 'MODERATE',
+        tradingStyle: user?.tradingStyle || 'SWING',
+        tags: user?.tags ? user.tags.join(', ') : '',
       })
     }
   }, [user])
@@ -124,9 +130,20 @@ export default function ProfilePage() {
     setSaving(true)
     setError('')
     try {
+      const tagsArray = form.tags
+        ? form.tags
+            .split(',')
+            .map((t: string) => t.trim().toLowerCase().replace(/^#/, ''))
+            .filter(Boolean)
+        : []
+
       await api.put('/api/user/profile', {
-        ...form,
+        username: form.username,
+        bio: form.bio,
         subscriptionFee: Number(form.subscriptionFee),
+        riskLevel: form.riskLevel,
+        tradingStyle: form.tradingStyle,
+        tags: tagsArray,
       })
       await refreshUser()
       setSuccess(true)
@@ -413,6 +430,54 @@ export default function ProfilePage() {
                     value={form.subscriptionFee}
                     onChange={(e) => handleChange('subscriptionFee', e.target.value)}
                     hint="Followers pay this fee in Base Sepolia ETH via MetaMask to anchor a 30-day relationship on Arkiv."
+                  />
+
+                  {/* Risk Profile & Trading Style */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label htmlFor="riskLevel" className="block text-xs font-semibold text-text-primary">
+                        Risk Profile
+                      </label>
+                      <select
+                        id="riskLevel"
+                        value={form.riskLevel}
+                        onChange={(e) => handleChange('riskLevel', e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-surface-raised border border-border text-sm text-text-primary focus:border-accent focus:outline-none transition-colors cursor-pointer"
+                      >
+                        <option value="CONSERVATIVE">Conservative (Low Drawdown, Hedged)</option>
+                        <option value="MODERATE">Moderate (Balanced Macro/Swing)</option>
+                        <option value="AGGRESSIVE">Aggressive (High Momentum/Beta)</option>
+                        <option value="DEGEN">Degen Alpha (Max Leverage, Scalps)</option>
+                      </select>
+                      <p className="text-[11px] text-text-muted">Displays badge on your profile and directory cards.</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="tradingStyle" className="block text-xs font-semibold text-text-primary">
+                        Trading Style
+                      </label>
+                      <select
+                        id="tradingStyle"
+                        value={form.tradingStyle}
+                        onChange={(e) => handleChange('tradingStyle', e.target.value)}
+                        className="w-full px-3 py-2 rounded-md bg-surface-raised border border-border text-sm text-text-primary focus:border-accent focus:outline-none transition-colors cursor-pointer"
+                      >
+                        <option value="SWING">Swing Trader (Days to Weeks)</option>
+                        <option value="DAY_TRADER">Day Trader (Intraday)</option>
+                        <option value="SCALPER">Scalper (Minutes/Seconds)</option>
+                        <option value="POSITION">Position Trader (Long Term)</option>
+                      </select>
+                      <p className="text-[11px] text-text-muted">Informs subscribers about your expected hold duration.</p>
+                    </div>
+                  </div>
+
+                  <Input
+                    id="tags"
+                    label="Profile Tags (Comma separated)"
+                    placeholder="e.g. eth, momentum, swing, defi"
+                    value={form.tags}
+                    onChange={(e) => handleChange('tags', e.target.value)}
+                    hint="Searchable tags shown on the Explore directory."
                   />
 
                   <Textarea

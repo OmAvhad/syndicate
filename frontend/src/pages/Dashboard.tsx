@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/Badge'
 import { formatDate, truncateHash } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import WalletConnectButton from '@/components/WalletConnectButton'
+import ShieldedPoolCard from '@/components/ShieldedPoolCard'
+import DashboardBalanceCard from '@/components/DashboardBalanceCard'
 import { getBaseScanAddressUrl } from '@/lib/network'
 import {
   Users,
@@ -150,6 +152,7 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
+              <Link to="/history" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-surface-raised border border-border text-xs font-semibold text-text-primary">Trade history & P/L</Link>
               <Link
                 to="/trade"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-accent text-text-inverse text-xs font-bold hover:bg-[#d4f885] transition-all shadow-[0_2px_12px_rgba(198,243,106,0.18)]"
@@ -267,6 +270,17 @@ export default function Dashboard() {
             })}
           </div>
         </div>
+
+        {/* Live Multi-Tier Account Balances (MetaMask + ZK Shielded + Execution Burner) */}
+        {user && (
+          <DashboardBalanceCard
+            key={`bal-${user.id}:${user.walletAddress || ''}`}
+            userId={user.id}
+            walletAddress={user.walletAddress}
+          />
+        )}
+
+        {user && <ShieldedPoolCard key={`${user.id}:${user.walletAddress || ''}`} userId={user.id} walletAddress={user.walletAddress} />}
 
         {/* Two-Column Information Architecture */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -55,6 +55,8 @@ const tradeSignalSchema = new mongoose.Schema(
       target: Number,
       burnerAccountAddress: String,
       payloadHash: String,
+      promiseId: String,
+      tradeIndex: Number,
     },
     arkivEntityKey: {
       type: String,
@@ -70,7 +72,6 @@ const tradeSignalSchema = new mongoose.Schema(
     expiresAt: {
       type: Date,
       required: true,
-      index: true,
     },
     status: {
       type: String,

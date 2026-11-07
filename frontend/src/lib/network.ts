@@ -103,6 +103,18 @@ export async function decryptWithMetaMask<T = unknown>(encryptedHex: string, add
     throw new Error('MetaMask is not installed.')
   }
 
+  if (!/^0x[0-9a-f]{40}$/i.test(address)) throw new Error('Invalid follower wallet address.')
+  if (!/^0x(?:[0-9a-f]{2})+$/i.test(encryptedHex)) throw new Error('The encrypted signal is malformed. Request a fresh leader signal.')
+  try {
+    const bytes = new Uint8Array(encryptedHex.slice(2).match(/../g)!.map(pair => parseInt(pair, 16)))
+    const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    if (payload.version !== 'x25519-xsalsa20-poly1305' || typeof payload.nonce !== 'string' || atob(payload.nonce).length !== 24 || typeof payload.ephemPublicKey !== 'string' || atob(payload.ephemPublicKey).length !== 32 || typeof payload.ciphertext !== 'string' || atob(payload.ciphertext).length < 16) throw new Error('Invalid encrypted envelope')
+  } catch { throw new Error('The signal cannot be read by MetaMask: invalid encrypted payload. Request a fresh leader signal.') }
+  const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[]
+  if (accounts[0]?.toLowerCase() !== address.toLowerCase()) {
+    throw new Error(`Select the follower wallet ${address} in MetaMask before decrypting. The active account is different.`)
+  }
+
   const decryptedUtf8 = (await window.ethereum.request({
     method: 'eth_decrypt',
     params: [encryptedHex, address],

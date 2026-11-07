@@ -11,6 +11,19 @@ interface User {
   subscriptionFee?: number
   followersCount?: number
   followingCount?: number
+  subscribersCount?: number
+  subscribedCount?: number
+  riskLevel?: 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE' | 'DEGEN'
+  tradingStyle?: string
+  tags?: string[]
+  stats?: {
+    totalPnlUsdc?: number
+    winRate?: number
+    totalTrades?: number
+    winningTrades?: number
+    profitFactor?: number
+    verifiedClaimsCount?: number
+  }
   bio?: string
   avatarUrl?: string
   verificationLevel: string

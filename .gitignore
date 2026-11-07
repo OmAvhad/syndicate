@@ -36,6 +36,9 @@ pids/
 
 # Testing & Coverage
 coverage/
+test-results/
+playwright-report/
+frontend/public/proving-artifacts/
 *.lcov
 .nyc_output/
 

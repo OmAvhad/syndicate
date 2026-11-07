@@ -1,0 +1,17 @@
+# Trade history, exits and promise claims
+
+The dashboard and navigation link to `/history` for leader trades and follower copies. New entries store the actual two Sepolia transaction hashes, verified ERC-20 amounts, burner gas cost and entry block time. Older rows with synthetic/missing hashes remain marked as legacy; their P/L is unknown rather than fabricated. Open local leader entries with retained receipts can be recovered into verified history using **Recover local leader entries**. Closed legacy entries without retained exit evidence cannot be reconstructed automatically.
+
+Successful copying keeps the modal open. It shows confirmation, receipts, bull and bear exit controls, and a history link. The leader terminal has both exits as well. History also offers both exits for verified open positions. These are manually triggered testnet scenarios through the demo vault, not automated oracle-backed bracket orders.
+
+Both roles share settlement code. Position quantities come from entry receipts. The scenario payout uses actual WETH quantity times the configured target/stop price, less 30 basis points of entry USDC retained by the vault. History records the actual USDC payout minus actual USDC entry as realized P/L. Burner native gas is shown separately; no ETH/USD conversion or live unrealized P/L is invented. Exit transaction hashes are saved locally before waiting for receipts. Retrying resumes submitted legs, and a closed trade cannot settle twice through these controls. Retain browser storage for burner keys and pending exits.
+
+## Claim Promise
+
+Existing `spec.md` and `arkiv/schema.md` define pre-trade `trade_promises`, not an existing claimed flag or payout. Per the agreed meaning, **Claim Promise** links a completed result to its earlier promise. A new `trade_result_claims` Arkiv schema stores trade/user/role, promise ID/entity/hash, burner, both entry and exit hashes, amounts, realized P/L and claim time. This exposes the result-to-burner linkage intentionally when the user claims.
+
+Before writing, the backend requires an owned, closed, receipt-verified position; reads confirmed result claims from the configured Arkiv writer; finds the matching original promise; checks the committed HMAC against its retained payload; and checks that the promise timestamp precedes the entry block. Follower results link to the original leader commitment while retaining their own copy amounts and receipts. HMAC verification is performed by the backend; this is a relayer-attested result link, not a new zero-knowledge proof.
+
+Existing matching claims are returned instead of written again. Unknown/failed Arkiv reads disable claiming and do not imply unclaimed. There is no simulated entity fallback for result claims. Promise and result entities currently have 30-day retention, so missing/expired promises cannot be claimed as if still verifiable. Keep the commitment HMAC secret stable for that audit period. The original signal ciphertext and the final result claim serve different purposes.
+
+Validation includes receipt/P&L and duplicate-exit tests, claim commitment/idempotency tests, and a browser history check covering both roles, exits and claimed state. Live read-only Arkiv queries were checked; testing did not submit a live exit or publish a result claim. Follower funding still uses the existing static demo account; fresh follower burners remain a separate integration.

@@ -28,6 +28,9 @@ flowchart TD
     WS --> Follower["8. Follower receives alert and executes copy"]
     
     FollowerSub["Follower Subscribes on /explore"] --> ArkivF["Arkiv follower_relationships\n(30-Day Auto-Revoke TTL)"]
+
+    Close["9. Leader / Follower Closes Position on Sepolia"] --> Claim["10. Claim Promise on /history"]
+    Claim --> ArkivC["11. Arkiv trade_result_claims\n(Immutable Result Attestation)"]
 ```
 
 ---

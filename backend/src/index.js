@@ -7,6 +7,8 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import followRoutes from './routes/follow.js';
 import tradeRoutes from './routes/trade.js';
+import poolRoutes from './routes/pool.js';
+import postRoutes from './routes/post.js';
 import { initWebSocketServer } from './websocket.js';
 
 const app = express();
@@ -32,8 +34,10 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
-app.use('/api', followRoutes);
+app.use('/api/pool', poolRoutes);
 app.use('/api/trades', tradeRoutes);
+app.use('/api/posts', postRoutes);
+app.use('/api', followRoutes);
 
 // Health check
 app.get(['/health', '/healthz'], (req, res) => {

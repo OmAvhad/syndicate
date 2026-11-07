@@ -1,7 +1,14 @@
+import { BASE_FOLLOWER_WALLET, beginDirectBaseTrade, selectedBaseWallet, prepareDirectBaseTrade, signBaseWalletOrder } from '@/lib/directBaseWallet'
+import BaseTradeStatus from './BaseTradeStatus'
 import { useState, useEffect, useCallback } from 'react'
+import { parseUnits, formatEther } from 'viem'
 import { useSignals, TradeSignalItem } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
+import { useAuth } from '@/context/AuthContext'
+import { readBaseTrade, saveBaseTrade } from '@/lib/basePimlico'
+import { closeTrade, usdc } from '@/lib/tradeJournal'
+import { Link } from 'react-router-dom'
 import {
   executeTwoLegEntrySwap,
   executeTwoLegExitSwap,
@@ -10,6 +17,19 @@ import {
   FOLLOWER_BURNER_KEY,
   FOLLOWER_BURNER_ADDRESS,
 } from '@/lib/flashEngine'
+import {
+  fetchBaseMainnetBalances,
+  BASE_MAINNET_EXPLORER,
+  BASE_WETH,
+  BASE_USDC,
+  type BaseBurnerBalances,
+} from '@/lib/baseBurner'
+import {
+  quoteInput,
+  waitForDefinitiveFill,
+  fetchDefinitiveQuote,
+  submitDefinitiveOrder,
+} from '@/lib/definitiveService'
 import {
   TrendingUp,
   Clock,
@@ -45,6 +65,8 @@ interface FollowerLogItem {
 }
 
 export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps) {
+  const { user } = useAuth()
+  const [realizedPnl, setRealizedPnl] = useState<string | null>(null)
   const { executeCopyTrade, decryptSignal } = useSignals()
 
   // Encrypted signals receive their default amount after decryption.
@@ -67,7 +89,26 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
   const [exitResult, setExitResult] = useState<OnchainExecutionResult | null>(null)
   const [exitType, setExitType] = useState<'tp' | 'sl' | null>(null)
 
+  const isBaseMainnet = signal.network === 'BASE_MAINNET'
+  const baseBurner = { address: BASE_FOLLOWER_WALLET }
+  const [baseBalances, setBaseBalances] = useState<BaseBurnerBalances | null>(null)
+
+  const loadBaseBalances = useCallback(async () => {
+    if (!isBaseMainnet) return
+    try {
+      const b = await fetchBaseMainnetBalances(baseBurner.address)
+      setBaseBalances(b)
+    } catch (e) {
+      console.warn('Failed to load follower base balances:', e)
+    }
+  }, [isBaseMainnet, baseBurner.address])
+
+  useEffect(() => {
+    loadBaseBalances()
+  }, [loadBaseBalances])
+
   const loadFollowerBalance = useCallback(async () => {
+    if (isBaseMainnet) return
     try {
       setIsLoadingBalance(true)
       const bals = await fetchSepoliaBalances(FOLLOWER_BURNER_ADDRESS)
@@ -97,10 +138,10 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
 
   const isEncrypted = Boolean(signal.requiresMetaMaskDecrypt && !signal.isDecrypted)
 
-  const handleDecrypt = async () => {
+  const handleDecrypt = async (refreshEncryption = false) => {
     setIsDecrypting(true)
     setErrorMessage(null)
-    const res = await decryptSignal(signal.signalId)
+    const res = await decryptSignal(signal.signalId, refreshEncryption)
     setIsDecrypting(false)
     if (!res.success) {
       setErrorMessage(res.error || 'Failed to decrypt trade signal')
@@ -150,6 +191,43 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
     try {
       addCopyLog('info', `Initializing copy trade: ${signal.side} ${signal.symbol} @ $${signal.limit} (Capital: $${numAmount.toFixed(2)} USDC)`)
 
+      if (isBaseMainnet) {
+        if (!user?.walletAddress) throw new Error('Connect the follower funding wallet.')
+        if (!navigator.locks) throw new Error('Web Locks support is required for safe trade retries.')
+        return await navigator.locks.request(`syndicate:base-flow:${BASE_FOLLOWER_WALLET.toLowerCase()}`, { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error('A Base trade is already running in another tab.')
+        const burner = { address: BASE_FOLLOWER_WALLET }
+        await selectedBaseWallet(burner.address)
+        await beginDirectBaseTrade(burner.address)
+        const qty = String(numAmount)
+        const side = signal.side === 'BUY' ? 'buy' : 'sell'
+        let saved = readBaseTrade(burner.address)
+        const inputs = JSON.stringify({ signalId: signal.signalId, qty, side })
+        if (saved.inputs && saved.inputs !== inputs) throw new Error('Another trade is pending on this burner. Resume it before creating another.')
+        saveBaseTrade(burner.address, { inputs })
+        let quote = saved.quote && (saved.orderId || saved.orderSubmissionStarted) ? JSON.parse(saved.quote) : await fetchDefinitiveQuote({ targetAsset: BASE_WETH, contraAsset: BASE_USDC, side, qty, funderAddress: burner.address, bracketLevels: signal.side === 'BUY' ? { referencePrice: Number(signal.limit), takeProfit: String(signal.target), stopLoss: String(signal.stopLoss) } : undefined })
+        if (!saved.orderId && !saved.orderSubmissionStarted) {
+          const input = quoteInput(quote, burner.address, signal.side === 'BUY' ? 'BUY' : 'SELL', qty)
+          addCopyLog('onchain', 'Confirm token approvals in MetaMask for the fixed follower wallet.')
+          await prepareDirectBaseTrade(burner.address, input.token, input.amount, quote.attachedBracket ? parseUnits(quote.attachedBracket.signedMaxFromAmount, 18) : undefined)
+          quote = await fetchDefinitiveQuote({ targetAsset: BASE_WETH, contraAsset: BASE_USDC, side, qty, funderAddress: burner.address, bracketLevels: quote.demoLevels })
+          quoteInput(quote, burner.address, signal.side === 'BUY' ? 'BUY' : 'SELL', qty)
+          saveBaseTrade(burner.address, { quote: JSON.stringify(quote) })
+        }
+        saved = readBaseTrade(burner.address)
+        addCopyLog('onchain', 'Waiting for actual Definitive settlement...')
+        const order = saved.orderId ? await waitForDefinitiveFill(saved.orderId, burner.address) : await submitDefinitiveOrder({ protectedQuote: quote, quoteId: quote.quoteId, targetAsset: BASE_WETH, contraAsset: BASE_USDC, side, qty, funderAddress: burner.address, signProtection: typed => signBaseWalletOrder(burner.address, typed), userSignature: await signBaseWalletOrder(burner.address, quote.evm.orderTypedData), evmOrderTypedData: quote.evm.orderTypedData })
+        if (!order.txHash) throw new Error('No confirmed Base settlement returned.')
+        const res = await executeCopyTrade(signal.signalId, numAmount, order.txHash, undefined, burner.address, order.orderId)
+        if (!res.success || !res.tradeId) throw new Error(res.error || 'Fill recording failed. Retry to resume.')
+        saveBaseTrade(burner.address, { recorded: 'true', tradeId: res.tradeId })
+        setExecutionReceipt({ tradeId: res.tradeId })
+        addCopyLog('success', 'Copy trade settled on Base and saved to history.', { label: 'Base settlement', url: `${BASE_MAINNET_EXPLORER}/tx/${order.txHash}` })
+        await loadBaseBalances()
+        return
+        })
+      }
+
       // 1. Execute Real Onchain Flash Swap on Ethereum Sepolia for Follower
       addCopyLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via dedicated follower burner ${truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}...`)
       console.log(`[Follower Copy] Executing onchain swap via burner ${FOLLOWER_BURNER_ADDRESS} for $${numAmount.toFixed(2)} USDC (~${calculatedWeth} WETH)...`)
@@ -181,14 +259,13 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
       )
 
       // 2. Record Copy Execution in Database
-      const res = await executeCopyTrade(signal.signalId, numAmount, onchainRes.leg1TxHash)
+      const res = await executeCopyTrade(signal.signalId, numAmount, onchainRes.leg1TxHash, onchainRes.leg2TxHash, onchainRes.traderAddress)
       if (res.success && res.tradeId) {
         setExecutionReceipt({ tradeId: res.tradeId })
-        addCopyLog('success', `Copy order filled and recorded with BRACKET TP/SL onchain (ID: ${res.tradeId})`)
+        addCopyLog('success', `Copy entry receipts verified and saved to history (ID: ${res.tradeId})`)
       } else {
-        const fallbackId = `cp_${Date.now()}`
-        setExecutionReceipt({ tradeId: fallbackId })
-        addCopyLog('success', `Copy trade executed onchain (ID: ${fallbackId})`)
+        setExecutionReceipt({ tradeId: '' })
+        setErrorMessage(`Transfers confirmed, but saving history failed: ${res.error || 'Unknown error'}. Retry saving below; do not execute the entry again.`)
       }
 
       // 3. Log Follower Copy Event for Judges
@@ -207,7 +284,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
           wethPositionReceived: `${onchainRes.wethAmount} WETH`,
           takeProfitTarget: `$${signal.target} (+${targetGainPct}% / +$${targetGainUsdc} USDC)`,
           stopLossTarget: `$${signal.stopLoss} (-${stopLossRiskPct}% / -$${stopLossRiskUsdc} USDC)`,
-          unrealizedPnL: `+$${(numAmount * 0.0283).toFixed(2)} USDC (+2.83% Mark)`,
+          unrealizedPnL: 'Not calculated: no live mark-price feed',
           blockNumber: onchainRes.blockNumber,
           gasUsed: onchainRes.gasUsed,
           settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
@@ -230,152 +307,27 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
     }
   }
 
-  // Trigger Onchain Take-Profit Exit ($3,350 Target - Bull Move)
-  const handleTriggerTakeProfitExit = async () => {
+  const handleExit = async (exit: 'tp' | 'sl') => {
+    if (isExiting || exitResult) return
+    setIsExiting(true); setExitType(exit); setErrorMessage(null)
     try {
-      setIsExiting(true)
-      setExitType('tp')
-      setErrorMessage(null)
-
-      const usdcCapital = numAmount > 0 ? numAmount : 2.00
-      const targetPrice = Number(signal.target || 3350)
-      const grossUsdc = Number((usdcCapital * (targetPrice / entryPrice)).toFixed(2))
-      const feeUsdc = Number((usdcCapital * 0.003).toFixed(2)) // 30 bps
-      const profitUsdc = Number((grossUsdc - feeUsdc).toFixed(2))
-      const netProfitAmount = Number((profitUsdc - usdcCapital).toFixed(2))
-
-      addCopyLog('info', `Take-Profit Trigger Hit ($${targetPrice.toLocaleString()}): Initiating onchain exit settlement...`)
-      addCopyLog('onchain', `Returning ${calculatedWeth} WETH position to FlashTradePool Vault...`)
-
-      const exitReceipt = await executeTwoLegExitSwap({
-        traderKey: FOLLOWER_BURNER_KEY,
-        wethAmountNumber: calculatedWeth,
-        usdcReturnAmountNumber: profitUsdc,
-        onLog: (msg) => {
-          console.log(`[Follower Exit] ${msg}`)
-          if (msg.includes('Leg 1: Returned WETH position to Vault')) {
-            addCopyLog('onchain', `Leg 1: WETH returned to Vault (Tx mined on Sepolia)`)
-          } else if (msg.includes('Leg 2: Vault released USDC with profit')) {
-            addCopyLog('onchain', `Leg 2: Vault released $${profitUsdc.toFixed(2)} USDC to Follower Burner`)
-          }
-        },
-      })
-
-      setExitResult(exitReceipt)
+      if (!user?.walletAddress || !executionReceipt?.tradeId) throw new Error('Save this copy to history before exiting.')
+      const settled = await closeTrade({ userId: user.id, walletAddress: user.walletAddress }, executionReceipt.tradeId, exit, message => addCopyLog('onchain', message))
+      setExitResult(settled.receipt)
+      setRealizedPnl(usdc(settled.trade.realizedPnlUnits))
+      addCopyLog('success', `Exit confirmed. Realized P/L: ${usdc(settled.trade.realizedPnlUnits)} USDC before native gas.`, { label: 'USDC payout receipt', url: settled.receipt.leg2ExplorerUrl })
+      logJudgeEvent({ category: 'EXIT_SETTLEMENT', title: `Follower ${exit === 'tp' ? 'Bull' : 'Bear'} exit confirmed`, details: { tradeId: settled.trade._id, payoutUSDC: usdc(settled.trade.exitUsdcUnits), realizedPnlUSDC: usdc(settled.trade.realizedPnlUnits), executionMode: 'Manual two-transfer demo scenario' }, links: [{ label: 'Exit payout', url: settled.receipt.leg2ExplorerUrl }] })
       await loadFollowerBalance()
-      setTimeout(() => { loadFollowerBalance() }, 2500)
-
-      addCopyLog(
-        'success',
-        `Exit Settled Onchain! Realized Net Profit: +$${netProfitAmount.toFixed(2)} USDC (+${targetGainPct}%)`,
-        { label: 'Etherscan USDC Release', url: exitReceipt.leg2ExplorerUrl }
-      )
-
-      // Log Follower Exit Event for Judges
-      logJudgeEvent({
-        category: 'EXIT_SETTLEMENT',
-        title: `Follower Bull Exit (Take-Profit @ $${targetPrice}) Onchain Settlement`,
-        details: {
-          tradeId: executionReceipt?.tradeId || 'N/A',
-          followerWallet: FOLLOWER_BURNER_ADDRESS,
-          wethPositionClosed: `${calculatedWeth} WETH`,
-          initialCapital: `$${usdcCapital.toFixed(2)} USDC`,
-          grossPayout: `$${grossUsdc.toFixed(2)} USDC (+${targetGainPct}%)`,
-          protocolFee: `-$${feeUsdc.toFixed(2)} USDC (30 bps)`,
-          netUsdcReleased: `$${profitUsdc.toFixed(2)} USDC`,
-          realizedNetProfit: `+$${netProfitAmount.toFixed(2)} USDC (+${targetGainPct}% Net)`,
-          blockNumber: exitReceipt.blockNumber,
-          gasUsed: exitReceipt.gasUsed,
-          txHash: exitReceipt.leg2TxHash,
-        },
-        links: [
-          { label: `Follower Return WETH Tx (${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
-          { label: `Follower USDC Payout Tx (${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
-        ],
-      })
-    } catch (err: unknown) {
-      const e = err as Error
-      console.error('[Follower Exit Error]', e)
-      addCopyLog('warn', `Exit settlement error: ${e.message}`)
-    } finally {
-      setIsExiting(false)
-    }
+    } catch (error) { setErrorMessage((error as Error).message); addCopyLog('warn', (error as Error).message) }
+    finally { setIsExiting(false) }
   }
-
-  // Trigger Onchain Stop-Loss Exit ($2,800 Target - Bear Move)
-  const handleTriggerStopLossExit = async () => {
-    try {
-      setIsExiting(true)
-      setExitType('sl')
-      setErrorMessage(null)
-
-      const usdcCapital = numAmount > 0 ? numAmount : 2.00
-      const stopPrice = Number(signal.stopLoss || 2800)
-      const grossUsdc = Number((usdcCapital * (stopPrice / entryPrice)).toFixed(2))
-      const feeUsdc = Number((usdcCapital * 0.003).toFixed(2))
-      const returnUsdc = Number((grossUsdc - feeUsdc).toFixed(2))
-      const netLossAmount = Number((returnUsdc - usdcCapital).toFixed(2))
-
-      addCopyLog('info', `Stop-Loss Trigger Hit ($${stopPrice.toLocaleString()}): Initiating onchain exit settlement...`)
-      addCopyLog('onchain', `Returning ${calculatedWeth} WETH position to FlashTradePool Vault...`)
-
-      const exitReceipt = await executeTwoLegExitSwap({
-        traderKey: FOLLOWER_BURNER_KEY,
-        wethAmountNumber: calculatedWeth,
-        usdcReturnAmountNumber: returnUsdc,
-        onLog: (msg) => {
-          console.log(`[Follower Exit] ${msg}`)
-          if (msg.includes('Leg 1: Returned WETH position to Vault')) {
-            addCopyLog('onchain', `Leg 1: WETH returned to Vault (Tx mined on Sepolia)`)
-          } else if (msg.includes('Leg 2: Vault released USDC with profit')) {
-            addCopyLog('onchain', `Leg 2: Vault released $${returnUsdc.toFixed(2)} USDC to Follower Burner`)
-          }
-        },
-      })
-
-      setExitResult(exitReceipt)
-      await loadFollowerBalance()
-      setTimeout(() => { loadFollowerBalance() }, 2500)
-
-      addCopyLog(
-        'warn',
-        `Stop-Loss Settled Onchain! Capital Preserved: $${returnUsdc.toFixed(2)} USDC (${netLossAmount.toFixed(2)})`,
-        { label: 'Etherscan USDC Release', url: exitReceipt.leg2ExplorerUrl }
-      )
-
-      // Log Follower Exit Event for Judges
-      logJudgeEvent({
-        category: 'EXIT_SETTLEMENT',
-        title: `Follower Bear Exit (Stop-Loss @ $${stopPrice}) Onchain Settlement`,
-        details: {
-          tradeId: executionReceipt?.tradeId || 'N/A',
-          followerWallet: FOLLOWER_BURNER_ADDRESS,
-          wethPositionClosed: `${calculatedWeth} WETH`,
-          initialCapital: `$${usdcCapital.toFixed(2)} USDC`,
-          netUsdcPreserved: `$${returnUsdc.toFixed(2)} USDC`,
-          realizedLoss: `${netLossAmount.toFixed(2)} USDC`,
-          blockNumber: exitReceipt.blockNumber,
-          gasUsed: exitReceipt.gasUsed,
-          txHash: exitReceipt.leg2TxHash,
-        },
-        links: [
-          { label: `Follower Return WETH Tx (${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
-          { label: `Follower USDC Preservation Tx (${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
-        ],
-      })
-    } catch (err: unknown) {
-      const e = err as Error
-      console.error('[Follower Exit Error]', e)
-      addCopyLog('warn', `Exit settlement error: ${e.message}`)
-    } finally {
-      setIsExiting(false)
-    }
-  }
+  const handleTriggerTakeProfitExit = () => handleExit('tp')
+  const handleTriggerStopLossExit = () => handleExit('sl')
 
   const isBuy = signal.side === 'BUY' || signal.side === 'LONG'
 
   return (
-    <div className="fixed inset-0 z-50 bg-bg/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn overflow-y-auto">
+    <div role="dialog" aria-modal="true" aria-label={executionReceipt ? 'Copy trade successful' : 'Copy trade'} className="fixed inset-0 z-50 bg-bg/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn overflow-y-auto">
       <div className="surface p-6 sm:p-7 max-w-lg w-full rounded-xl border border-border-strong shadow-[0_20px_50px_rgba(0,0,0,0.7)] animate-slideUp my-8 max-h-[90vh] overflow-y-auto">
         
         {/* Header */}
@@ -411,6 +363,19 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
         {executionReceipt ? (
           /* Execution Success State */
           <div className="space-y-4 text-center py-2 animate-fadeIn">
+            <h4 className="text-lg font-bold text-semantic-success">Copy trade successful</h4>
+            {isBaseMainnet && executionReceipt.tradeId && <BaseTradeStatus tradeId={executionReceipt.tradeId} />}
+            {isBaseMainnet && <div className="text-sm space-y-2"><p>Real Base settlement confirmed. BUY trades use automatic Definitive take-profit / stop-loss orders at +/-0.05% from their live reference price.</p><p>Timing depends on market movement. Manual Sepolia exits are disabled for Base.</p>{readBaseTrade(baseBurner.address).fillTxHash && <a className="text-accent underline" target="_blank" rel="noopener noreferrer" href={`${BASE_MAINNET_EXPLORER}/tx/${readBaseTrade(baseBurner.address).fillTxHash}`}>View Base settlement</a>}</div>}
+            {errorMessage && <p role="alert" className="text-sm text-semantic-danger">{errorMessage}</p>}
+            {realizedPnl !== null && <p className="text-sm">Realized P/L: <strong>{realizedPnl} USDC</strong> before native gas.</p>}
+            <Link to="/history" onClick={onClose} className="block text-sm text-accent underline">View history, P/L & Claim Promise</Link>
+            {!executionReceipt.tradeId && onchainReceipt && <button type="button" disabled={isExecuting} className="text-xs text-accent underline" onClick={async () => {
+              setIsExecuting(true)
+              const result = await executeCopyTrade(signal.signalId, numAmount, onchainReceipt.leg1TxHash, onchainReceipt.leg2TxHash, onchainReceipt.traderAddress)
+              if (result.success && result.tradeId) { setExecutionReceipt({ tradeId: result.tradeId }); setErrorMessage(null) }
+              else setErrorMessage(result.error || 'History recording failed; retain receipts and retry.')
+              setIsExecuting(false)
+            }}>Retry saving confirmed entry to history</button>}
             <div className="w-12 h-12 rounded-full bg-semantic-success/20 text-semantic-success flex items-center justify-center mx-auto shadow-sm">
               <Check className="w-6 h-6 stroke-[2.5]" />
             </div>
@@ -418,7 +383,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
             <div>
               <h4 className="text-base font-extrabold text-text-primary">Copy Trade #{signal.tradeIndex || 1} Executed!</h4>
               <p className="text-xs text-text-secondary mt-1">
-                Your order for <strong className="text-text-primary">${numAmount.toFixed(2)} USDC</strong> has been atomically swapped on Ethereum Sepolia.
+                Your copy of <strong className="text-text-primary">${numAmount.toFixed(2)} USDC</strong> completed its two transfers on Ethereum Sepolia.
               </p>
             </div>
 
@@ -427,7 +392,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 <span className="text-text-muted">Order Fill Status</span>
                 <span className="text-semantic-success font-bold flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-semantic-success" />
-                  FILLED ONCHAIN (BRACKET)
+                  ENTRY CONFIRMED
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -485,6 +450,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 </div>
               )}
 
+              {!isBaseMainnet && <>
               {/* Trade PnL & Position Metrics for Follower */}
               <div className="p-3 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 space-y-2 text-zinc-950 dark:text-zinc-100 shadow-sm">
                 <div className="flex items-center justify-between pb-1 border-b border-zinc-300 dark:border-zinc-800 text-[11px] font-black uppercase text-zinc-950 dark:text-white">
@@ -530,7 +496,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     <span>Onchain Exit Settlements</span>
                   </span>
                   <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-accent-soft text-accent">
-                    {exitResult ? 'POSITION CLOSED' : 'ORACLE TRIGGERS'}
+                    {exitResult ? 'POSITION CLOSED' : 'MANUAL DEMO EXITS'}
                   </span>
                 </div>
 
@@ -538,7 +504,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   <button
                     type="button"
                     onClick={handleTriggerTakeProfitExit}
-                    disabled={isExiting || Boolean(exitResult)}
+                    disabled={isBaseMainnet || isExiting || Boolean(exitResult) || !executionReceipt.tradeId}
                     className="py-2.5 px-2 rounded-md bg-semantic-success/20 hover:bg-semantic-success/30 border border-semantic-success/50 text-semantic-success font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                   >
                     {isExiting && exitType === 'tp' ? (
@@ -554,7 +520,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     ) : (
                       <>
                         <TrendingUp className="w-3.5 h-3.5" />
-                        <span>🚀 Bull Move ($3,350)</span>
+                        <span>Bull exit (${signal.target})</span>
                       </>
                     )}
                   </button>
@@ -562,7 +528,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   <button
                     type="button"
                     onClick={handleTriggerStopLossExit}
-                    disabled={isExiting || Boolean(exitResult)}
+                    disabled={isBaseMainnet || isExiting || Boolean(exitResult) || !executionReceipt.tradeId}
                     className="py-2.5 px-2 rounded-md bg-semantic-danger/15 hover:bg-semantic-danger/25 border border-semantic-danger/40 text-semantic-danger font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                   >
                     {isExiting && exitType === 'sl' ? (
@@ -578,7 +544,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     ) : (
                       <>
                         <AlertCircle className="w-3.5 h-3.5" />
-                        <span>🛑 Bear Move ($2,800)</span>
+                        <span>Bear exit (${signal.stopLoss})</span>
                       </>
                     )}
                   </button>
@@ -606,6 +572,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 )}
               </div>
 
+              </>}
               {/* Follower Execution Logs & Audit Trail */}
               {copyLogs.length > 0 && (
                 <div className="p-3 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 shadow-md font-mono text-[10px] space-y-1">
@@ -725,7 +692,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   {isEncrypted && (
                     <button
                       type="button"
-                      onClick={handleDecrypt}
+                      onClick={() => void handleDecrypt()}
                       disabled={isDecrypting}
                       className="shrink-0 py-1.5 px-3 rounded-sm bg-accent text-text-inverse font-bold text-xs hover:bg-[#d4f885] transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-60"
                     >
@@ -743,6 +710,10 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                     </button>
                   )}
                 </div>
+                {isEncrypted && <div className="mt-3 border-t border-border pt-3 space-y-2">
+                  <p className="text-[11px] text-text-secondary">MetaMask unable to decrypt? Cancel its pending request, then refresh the encryption key. This re-encrypts your active signal without extending its expiry.</p>
+                  <button type="button" disabled={isDecrypting} onClick={() => void handleDecrypt(true)} className="text-xs font-semibold text-accent underline disabled:opacity-50">Refresh encryption key & retry</button>
+                </div>}
               </div>
             )}
 
@@ -849,30 +820,34 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
               )}
             </div>
 
-            {/* Follower Burner Account & Live Sepolia Balance */}
-            <div className="p-3 rounded-lg bg-surface-raised border border-border flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded bg-accent/10 text-accent">
-                  <Flame className="w-4 h-4" />
+            {/* Follower Burner Account */}
+            {isBaseMainnet ? (
+              <div className="p-3 rounded-lg border border-border text-xs space-y-2"><p className="font-bold">Base follower trading wallet</p><a className="mono text-accent break-all" target="_blank" rel="noopener noreferrer" href={`${BASE_MAINNET_EXPLORER}/address/${BASE_FOLLOWER_WALLET}`}>{BASE_FOLLOWER_WALLET}</a><p className="text-text-muted">Select this account in MetaMask to approve tokens and sign the trade.</p></div>
+            ) : (
+              <div className="p-3 rounded-lg bg-surface-raised border border-border flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded bg-accent/10 text-accent">
+                    <Flame className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-text-muted">Follower Burner Account</div>
+                    <div className="mono font-bold text-text-primary text-[11px]">
+                      {truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-text-muted">Follower Burner Account</div>
-                  <div className="mono font-bold text-text-primary text-[11px]">
-                    {truncateHash(FOLLOWER_BURNER_ADDRESS, 6)}
+                <div className="text-right">
+                  <div className="text-[10px] uppercase font-bold text-text-muted">Available Balance</div>
+                  <div className="mono font-extrabold text-accent text-sm">
+                    {isLoadingBalance ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin inline text-accent" />
+                    ) : (
+                      `$${followerBalances?.usdc || '15.00'} USDC`
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-[10px] uppercase font-bold text-text-muted">Available Balance</div>
-                <div className="mono font-extrabold text-accent text-sm">
-                  {isLoadingBalance ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin inline text-accent" />
-                  ) : (
-                    `$${followerBalances?.usdc || '15.00'} USDC`
-                  )}
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* Custom Amount Field with Quick Presets */}
             <fieldset disabled={isEncrypted} className="space-y-2 disabled:opacity-50">
@@ -982,7 +957,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
               {isEncrypted ? (
                 <button
                   type="button"
-                  onClick={handleDecrypt}
+                  onClick={() => void handleDecrypt()}
                   disabled={isDecrypting}
                   className="flex-1 py-2.5 rounded-md bg-accent hover:bg-[#d4f885] text-text-inverse text-xs font-bold transition-all shadow-[0_2px_14px_rgba(198,243,106,0.2)] disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
                 >

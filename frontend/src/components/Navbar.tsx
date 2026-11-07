@@ -6,7 +6,7 @@ import { truncateHash } from '@/lib/utils'
 import ThemeToggle from '@/components/ThemeToggle'
 import WalletConnectButton from '@/components/WalletConnectButton'
 import MetaMaskPromptBanner from '@/components/MetaMaskPromptBanner'
-import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio, Zap, Download, AlertCircle } from 'lucide-react'
+import { LogOut, User, ChevronDown, ShieldCheck, Menu, X, LayoutDashboard, Wallet, Compass, TrendingUp, Radio, Zap, Download, AlertCircle, Trophy, MessageSquare } from 'lucide-react'
 
 export default function Navbar() {
   const { user, logout } = useAuth()
@@ -42,10 +42,10 @@ export default function Navbar() {
         </Link>
 
         {/* Desktop Nav */}
-        <div className="hidden md:flex items-center gap-3">
+        <div className="hidden md:flex items-center gap-2 lg:gap-3">
           <Link
             to="/"
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/'
+            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 lg:px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/'
               ? 'bg-surface-raised text-text-primary border border-border'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface'
               }`}
@@ -55,8 +55,30 @@ export default function Navbar() {
           </Link>
 
           <Link
+            to="/leaderboard"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 lg:px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/leaderboard'
+              ? 'bg-surface-raised text-text-primary border border-border'
+              : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+              }`}
+          >
+            <Trophy className="w-3.5 h-3.5 text-amber-400" />
+            <span>Leaderboard</span>
+          </Link>
+
+          <Link
+            to="/feed"
+            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 lg:px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/feed'
+              ? 'bg-surface-raised text-text-primary border border-border'
+              : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+              }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-accent" />
+            <span>Feed</span>
+          </Link>
+
+          <Link
             to="/explore"
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/explore'
+            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 lg:px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/explore'
               ? 'bg-surface-raised text-text-primary border border-border'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface'
               }`}
@@ -67,15 +89,16 @@ export default function Navbar() {
 
           <Link
             to="/trade"
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/trade'
+            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 lg:px-3 py-1.5 rounded-pill transition-colors duration-fast ${location.pathname === '/trade'
               ? 'bg-accent text-text-inverse shadow-[0_0_12px_rgba(198,243,106,0.2)]'
               : 'text-text-secondary hover:text-text-primary hover:bg-surface'
               }`}
           >
             <TrendingUp className="w-3.5 h-3.5 stroke-[2.2]" />
-            <span>Trade Terminal</span>
+            <span>Terminal</span>
           </Link>
 
+          <Link to="/history" className="text-xs font-semibold text-text-secondary hover:text-text-primary px-2 py-1.5">History</Link>
           <Link
             to="/flash-trade"
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-pill transition-colors duration-fast ${
@@ -220,6 +243,22 @@ export default function Navbar() {
           >
             <LayoutDashboard className="w-4 h-4 text-accent" />
             Dashboard
+          </Link>
+          <Link
+            to="/leaderboard"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
+          >
+            <Trophy className="w-4 h-4 text-amber-400" />
+            Leaderboard
+          </Link>
+          <Link
+            to="/feed"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary rounded-md hover:bg-surface-hover"
+          >
+            <MessageSquare className="w-4 h-4 text-accent" />
+            Feed
           </Link>
           <Link
             to="/explore"

@@ -1,19 +1,43 @@
-import { useState, useEffect, useCallback } from 'react'
+import { BASE_LEADER_WALLET, beginDirectBaseTrade, selectedBaseWallet, prepareDirectBaseTrade, signBaseWalletOrder } from '@/lib/directBaseWallet'
+import BaseTradeStatus from '@/components/BaseTradeStatus'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
+import { formatEther, parseUnits, type Address } from 'viem'
+import type { PoolView } from '@/lib/shielded/pool'
+import type { FundingQuote, TradingBurner } from '@/lib/shielded/tradeFunding'
+import { scopeKey } from '@/lib/shielded/storage'
+import { readCachedBalance } from '@/lib/shielded/balanceCache'
+import { artifactsReady, prepareArtifacts, requireArtifactsReady, artifactTotalBytes } from '@/lib/shielded/artifactFetch'
 import { useAuth } from '@/context/AuthContext'
 import api from '@/lib/api'
+import { readBaseTrade, saveBaseTrade } from '@/lib/basePimlico'
 import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
+import { closeTrade, usdc } from '@/lib/tradeJournal'
 import {
   executeTwoLegEntrySwap,
   executeTwoLegExitSwap,
   type OnchainExecutionResult,
   fetchSepoliaBalances,
-  LEADER_BURNER_ADDRESS,
-  LEADER_BURNER_KEY,
   FLASH_TRADE_POOL_ADDRESS,
 } from '@/lib/flashEngine'
+import {
+  fetchBaseMainnetBalances,
+  BASE_MAINNET_EXPLORER,
+  BASE_WETH,
+  BASE_USDC,
+  type BaseBurnerBalances,
+} from '@/lib/baseBurner'
+import {
+  quoteInput,
+  waitForDefinitiveFill,
+  fetchDefinitiveQuote,
+  submitDefinitiveOrder,
+  type DefinitiveQuoteResponse,
+} from '@/lib/definitiveService'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import {
   TrendingUp,
   ArrowUpRight,
@@ -34,6 +58,11 @@ import {
   Zap,
   Download,
   Terminal,
+  Globe,
+  Wallet,
+  ArrowRightLeft,
+  X,
+  AlertTriangle,
 } from 'lucide-react'
 
 const SYMBOLS = [
@@ -47,15 +76,109 @@ const SYMBOLS = [
 export default function LeaderTerminalPage() {
   const { user } = useAuth()
 
+  const [networkMode, setNetworkMode] = useState<'BASE_MAINNET' | 'SEPOLIA_TESTNET'>('BASE_MAINNET')
+
   // Form State
   const [symbol, setSymbol] = useState('ETH/USDC')
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY')
   const [orderType, setOrderType] = useState<'BRACKET' | 'LIMIT' | 'MARKET'>('BRACKET')
   const [limit, setLimit] = useState('3000')
-  const [amount, setAmount] = useState('3.00')
+  const [amount, setAmount] = useState('0.50')
   const [stopLoss, setStopLoss] = useState('2800')
   const [target, setTarget] = useState('3350')
-  const [burnerAddress, setBurnerAddress] = useState<string>(LEADER_BURNER_ADDRESS)
+  const [burnerAddress, setBurnerAddress] = useState<string>('')
+  const burnerRef = useRef<TradingBurner | null>(null)
+  const submittingRef = useRef(false)
+  const scope = user?.walletAddress ? { userId: user.id, walletAddress: user.walletAddress } : null
+  const [privateView, setPrivateView] = useState<PoolView | null>(null)
+  const [fundingQuote, setFundingQuote] = useState<FundingQuote | null>(null)
+  const [poolError, setPoolError] = useState('')
+  const [poolLoading, setPoolLoading] = useState(false)
+  const [rpcStatus, setRpcStatus] = useState('')
+  useEffect(() => {
+    const handler = (event: Event) => setRpcStatus((event as CustomEvent<string>).detail)
+    window.addEventListener('syndicate:rpc-status', handler)
+    return () => window.removeEventListener('syndicate:rpc-status', handler)
+  }, [])
+  const [shortfall, setShortfall] = useState<string | null>(null)
+  const [fundingEvidence, setFundingEvidence] = useState<{ operation?: string; transaction?: string }>({})
+  const [proofReady, setProofReady] = useState(false)
+  const [proofPreparing, setProofPreparing] = useState(false)
+  const [proofMessage, setProofMessage] = useState('Checking proof filesâ¦')
+  useEffect(() => {
+    let active = true
+    void artifactsReady().then(ready => {
+      if (active) { setProofReady(ready); setProofMessage(ready ? 'Proof files ready on this device.' : 'Prepare proof files once before trading.') }
+    }).catch(error => { if (active) setProofMessage(error.message) })
+    return () => { active = false }
+  }, [])
+  const prepareProofFiles = async () => {
+    setProofPreparing(true); setProofReady(false)
+    setProofMessage('Preparing proof filesâ¦')
+    try {
+      await prepareArtifacts((loaded, total, files) => setProofMessage(`Preparing proof files: ${Math.round(loaded / total * 100)}% Â· ${files}/75 files Â· ${(loaded / 1048576).toFixed(1)} MiB cached`))
+      setProofReady(true); setProofMessage('Proof files ready on this device. Trading uses the cached files.')
+    } catch (error) { setProofMessage((error as Error).message) }
+    finally { setProofPreparing(false) }
+  }
+  const refreshPrivate = useCallback(async (force = false) => {
+    if (!user?.walletAddress || networkMode !== 'SEPOLIA_TESTNET') return
+    setPoolLoading(true); setPoolError('')
+    const currentScope = { userId: user.id, walletAddress: user.walletAddress }
+    setPrivateView(readCachedBalance(currentScope))
+    try {
+      const pool = await import('@/lib/shielded/pool')
+      const view = await pool.syncPool(currentScope, { force })
+      setPrivateView(view)
+    } catch (error) { setPoolError((error as Error).message) }
+    finally { setPoolLoading(false) }
+  }, [user?.id, user?.walletAddress, networkMode])
+  useEffect(() => { void refreshPrivate() }, [refreshPrivate])
+  useEffect(() => {
+    let cancelled = false
+    setFundingQuote(null)
+    if (networkMode !== 'SEPOLIA_TESTNET') return
+    const timer = setTimeout(async () => {
+      try {
+        const service = await import('@/lib/shielded/tradeFunding')
+        const quote = await service.quoteTradeFunding(amount)
+        if (!cancelled) setFundingQuote(quote)
+      } catch (error) { if (!cancelled) setPoolError((error as Error).message) }
+    }, 500)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [amount, networkMode])
+  useEffect(() => {
+    if (!privateView || !fundingQuote) { setShortfall(null); return }
+    let cancelled = false
+    void import('@/lib/shielded/tradeFunding').then(service => {
+      const usdc = parseUnits(privateView.balances.find(b => b.symbol === 'USDC')?.amount || '0', 6)
+      const weth = parseUnits(privateView.balances.find(b => b.symbol === 'WETH')?.amount || '0', 18)
+      if (!cancelled) setShortfall(service.fundingShortfall(fundingQuote, usdc, weth))
+    })
+    return () => { cancelled = true }
+  }, [privateView, fundingQuote])
+  useEffect(() => {
+    burnerRef.current = null
+    setBurnerAddress('')
+    if (!scope || networkMode !== 'SEPOLIA_TESTNET') return
+    let cancelled = false
+    void import('@/lib/shielded/tradeFunding').then(service => {
+      const saved = service.loadTradingBurner(scope)
+      if (cancelled || !saved) return
+      burnerRef.current = saved
+      setBurnerAddress(saved.address)
+      setAmount(saved.quote.capital)
+      const inputs = JSON.parse(saved.inputs)
+      setSymbol(inputs.symbol); setSide(inputs.side); setOrderType(inputs.orderType)
+      setLimit(inputs.limit); setStopLoss(inputs.stopLoss); setTarget(inputs.target)
+      if (saved.entry) setOnchainResult(saved.entry)
+      if (saved.tradeId && saved.entry) setExecutionResult({ tradeId: saved.tradeId, executionTxHash: saved.entry.leg1TxHash })
+      if (saved.promise) setPromiseData(saved.promise)
+      if (saved.stage === 'open') setStep('completed')
+      setFundingEvidence({ operation: saved.userOpHash, transaction: saved.fundingTxHash })
+    }).catch(error => { if (!cancelled) setPoolError(error.message) })
+    return () => { cancelled = true }
+  }, [user?.id, user?.walletAddress, networkMode])
 
   // Live Onchain Balances (Burner & Vault)
   const [burnerBalances, setBurnerBalances] = useState<{ eth: string; usdc: string; weth: string } | null>(null)
@@ -63,14 +186,15 @@ export default function LeaderTerminalPage() {
   const [isLoadingBalances, setIsLoadingBalances] = useState(false)
 
   const loadBalances = useCallback(async () => {
+    if (networkMode !== 'SEPOLIA_TESTNET') return
     try {
       setIsLoadingBalances(true)
       const targetBurner = (burnerAddress && burnerAddress.startsWith('0x') && burnerAddress.length === 42)
         ? (burnerAddress as `0x${string}`)
-        : LEADER_BURNER_ADDRESS
+        : null
 
       const [bBal, vBal] = await Promise.all([
-        fetchSepoliaBalances(targetBurner),
+        targetBurner ? fetchSepoliaBalances(targetBurner) : Promise.resolve({ eth: '0', usdc: '0', weth: '0' }),
         fetchSepoliaBalances(FLASH_TRADE_POOL_ADDRESS),
       ])
       setBurnerBalances(bBal)
@@ -80,7 +204,7 @@ export default function LeaderTerminalPage() {
     } finally {
       setIsLoadingBalances(false)
     }
-  }, [burnerAddress])
+  }, [burnerAddress, networkMode])
 
   useEffect(() => {
     loadBalances()
@@ -88,7 +212,7 @@ export default function LeaderTerminalPage() {
 
   // Multi-step lifecycle state
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [step, setStep] = useState<'idle' | 'promising' | 'executing_onchain' | 'signaling' | 'completed' | 'error'>('idle')
+  const [step, setStep] = useState<'idle' | 'funding' | 'promising' | 'executing_onchain' | 'signaling' | 'completed' | 'error'>('idle')
   const [stepMessage, setStepMessage] = useState<string>('')
   const [promiseData, setPromiseData] = useState<{ promiseId: string; payloadHash: string; tradeIndex?: number; arkivEntityKey?: string } | null>(null)
   const [onchainResult, setOnchainResult] = useState<OnchainExecutionResult | null>(null)
@@ -124,15 +248,6 @@ export default function LeaderTerminalPage() {
     setTradeLogs(prev => [...prev, { time, type, message, link }])
   }, [])
 
-  // Generate a random burner account address
-  const handleGenerateBurner = () => {
-    const chars = '0123456789abcdef'
-    let addr = '0x'
-    for (let i = 0; i < 40; i++) {
-      addr += chars[Math.floor(Math.random() * chars.length)]
-    }
-    setBurnerAddress(addr)
-  }
 
   // Quick fill price based on selected symbol
   const handleSelectSymbol = (sym: string) => {
@@ -150,6 +265,135 @@ export default function LeaderTerminalPage() {
     }
   }
 
+  // Network Mode Toggle
+
+  // Base Mainnet Burner State
+  const baseBurner = { address: BASE_LEADER_WALLET }
+  const [baseBalances, setBaseBalances] = useState<BaseBurnerBalances | null>(null)
+  const [isLoadingBaseBalances, setIsLoadingBaseBalances] = useState(false)
+  const [definitiveQuote, setDefinitiveQuote] = useState<DefinitiveQuoteResponse | null>(null)
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false)
+  const [quoteError, setQuoteError] = useState<string | null>(null)
+
+  const loadBaseBalances = useCallback(async () => {
+    try {
+      setIsLoadingBaseBalances(true)
+      const bal = await fetchBaseMainnetBalances(baseBurner.address)
+      setBaseBalances(bal)
+    } catch (err) {
+      console.warn('Failed to load Base Mainnet balances:', err)
+    } finally {
+      setIsLoadingBaseBalances(false)
+    }
+  }, [baseBurner.address])
+
+  useEffect(() => {
+    loadBaseBalances()
+  }, [loadBaseBalances])
+
+  // Update Definitive Quote when parameters change
+  const updateDefinitiveQuote = useCallback(async () => {
+    if (networkMode !== 'BASE_MAINNET' || submittingRef.current) return
+    try {
+      setIsLoadingQuote(true)
+      setQuoteError(null)
+      const qtyStr = amount || (side === 'BUY' ? '0.50' : '0.0001')
+      const targetAsset = BASE_WETH
+      const contraAsset = BASE_USDC
+      const res = await fetchDefinitiveQuote({
+        targetAsset,
+        contraAsset,
+        side: side === 'BUY' ? 'buy' : 'sell',
+        qty: qtyStr,
+        funderAddress: baseBurner.address,
+      })
+      setDefinitiveQuote(res)
+      if (res.demoLevels) { setLimit(String(res.demoLevels.referencePrice)); setTarget(res.demoLevels.takeProfit); setStopLoss(res.demoLevels.stopLoss) }
+    } catch (err: unknown) {
+      const e = err as Error
+      setQuoteError(e.message || 'Failed to fetch quote')
+      setDefinitiveQuote(null)
+    } finally {
+      setIsLoadingQuote(false)
+    }
+  }, [networkMode, amount, side, baseBurner.address])
+
+  useEffect(() => {
+    if (networkMode === 'BASE_MAINNET') {
+      const timer = setTimeout(() => {
+        updateDefinitiveQuote()
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [updateDefinitiveQuote, networkMode])
+
+  // Base Mainnet Leader Trade Flow
+  const executeBaseMainnetLeaderFlow = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (submittingRef.current || !user?.walletAddress) return
+    submittingRef.current = true
+    setIsSubmitting(true)
+    setErrorMessage(null)
+    setTradeLogs([])
+    const progress = (message: string) => { setStepMessage(message); addTradeLog('onchain', message) }
+    try {
+      if (!navigator.locks) throw new Error('Web Locks support is required for safe trade retries.')
+      await navigator.locks.request(`syndicate:base-flow:${BASE_LEADER_WALLET.toLowerCase()}`, { ifAvailable: true }, async lock => {
+      if (!lock) throw new Error('A Base trade is already running in another tab.')
+      const burner = { address: BASE_LEADER_WALLET }
+      await selectedBaseWallet(burner.address)
+      await beginDirectBaseTrade(burner.address)
+      const tradeQty = amount
+      if (!Number.isFinite(Number(tradeQty)) || Number(tradeQty) <= 0) throw new Error('Enter a positive trade amount.')
+      const fingerprint = JSON.stringify({ side, tradeQty })
+      let saved = readBaseTrade(burner.address)
+      if (saved.inputs && saved.inputs !== fingerprint) throw new Error('This burner has a pending trade with different inputs. Restore those inputs or review its funds before rotating.')
+      saveBaseTrade(burner.address, { inputs: fingerprint })
+      let quote = saved.quote && (saved.orderId || saved.orderSubmissionStarted) ? JSON.parse(saved.quote) : await fetchDefinitiveQuote({ targetAsset: BASE_WETH, contraAsset: BASE_USDC, side: side === 'BUY' ? 'buy' : 'sell', qty: tradeQty, funderAddress: burner.address })
+      let tradePayload = saved.payload ? JSON.parse(saved.payload) : { symbol: 'WETH/USDC', side, orderType: 'MARKET', limit: quote.demoLevels?.referencePrice || Number(limit) || 3000, amount: Number(tradeQty), stopLoss: Number(quote.demoLevels?.stopLoss || stopLoss) || 2800, target: Number(quote.demoLevels?.takeProfit || target) || 3350, burnerAccountAddress: burner.address, network: 'BASE_MAINNET', definitiveQuoteId: quote.quoteId }
+      setLimit(String(tradePayload.limit)); setTarget(String(tradePayload.target)); setStopLoss(String(tradePayload.stopLoss))
+      setStep('promising')
+      progress('Sealing the trade promise before execution...')
+      const promise = saved.promise ? JSON.parse(saved.promise) : (await api.post('/api/trades/promise', tradePayload)).data
+      if (!promise.success) throw new Error(promise.error || 'Promise failed.')
+      saveBaseTrade(burner.address, { promise: JSON.stringify(promise), payload: JSON.stringify(tradePayload) })
+      setPromiseData(promise)
+      setStep('executing_onchain')
+      if (!saved.orderId && !saved.orderSubmissionStarted) {
+        const input = quoteInput(quote, burner.address, side, tradeQty)
+        progress(`Confirm token approvals for ${burner.address} in MetaMask.`)
+        await prepareDirectBaseTrade(burner.address, input.token, input.amount, quote.attachedBracket ? parseUnits(quote.attachedBracket.signedMaxFromAmount, 18) : undefined)
+        quote = await fetchDefinitiveQuote({ targetAsset: BASE_WETH, contraAsset: BASE_USDC, side: side === 'BUY' ? 'buy' : 'sell', qty: tradeQty, funderAddress: burner.address, bracketLevels: side === 'BUY' ? { referencePrice: tradePayload.limit, takeProfit: String(tradePayload.target), stopLoss: String(tradePayload.stopLoss) } : undefined })
+        quoteInput(quote, burner.address, side, tradeQty)
+        saveBaseTrade(burner.address, { quote: JSON.stringify(quote) })
+      }
+      saved = readBaseTrade(burner.address)
+      progress(saved.orderId ? 'Resuming Definitive fill confirmation...' : 'Signing the Definitive order and waiting for Base settlement...')
+      const order = saved.orderId ? await waitForDefinitiveFill(saved.orderId, burner.address) : await submitDefinitiveOrder({ protectedQuote: quote, quoteId: quote.quoteId, targetAsset: BASE_WETH, contraAsset: BASE_USDC, side: side === 'BUY' ? 'buy' : 'sell', qty: tradeQty, funderAddress: burner.address, signProtection: typed => signBaseWalletOrder(burner.address, typed), userSignature: await signBaseWalletOrder(burner.address, quote.evm.orderTypedData), evmOrderTypedData: quote.evm.orderTypedData })
+      if (!order.txHash) throw new Error('No confirmed settlement receipt returned.')
+      setStep('signaling')
+      progress('Verifying the Base fill and saving history...')
+      tradePayload = { ...tradePayload, definitiveQuoteId: quote.quoteId }
+      const execution = (await api.post('/api/trades/execute', { ...tradePayload, promiseId: promise.promiseId, tradeIndex: promise.tradeIndex, payloadHash: promise.payloadHash, executionTxHash: order.txHash, definitiveOrderId: order.orderId, isCopyTrade: false })).data
+      if (!execution.success) throw new Error(execution.error || 'Fill recording failed.')
+      setExecutionResult({ tradeId: execution.tradeId, executionTxHash: order.txHash })
+      saveBaseTrade(burner.address, { tradeId: execution.tradeId })
+      const signals = (await api.post('/api/trades/signal', { ...tradePayload, tradeIndex: promise.tradeIndex, payloadHash: promise.payloadHash, promiseId: promise.promiseId, definitiveOrderId: order.orderId })).data
+      if (!signals.success) throw new Error(signals.error || 'Signal dispatch failed. Retry to resume without repeating the trade.')
+      setSignalResult({ followersNotified: signals.followersNotified || 0, signals: signals.signals || [] })
+      saveBaseTrade(burner.address, { recorded: 'true' })
+      setStep('completed')
+      progress('Base trade confirmed, recorded, and shared with followers.')
+      await loadBaseBalances()
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Base trade failed.'
+      setErrorMessage(message)
+      addTradeLog('warn', message)
+      setStep('error')
+    } finally { submittingRef.current = false; setIsSubmitting(false) }
+  }
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text)
     setCopiedKey(id)
@@ -162,6 +406,19 @@ export default function LeaderTerminalPage() {
   // 3. Trigger simultaneous Execution record & Follower Encrypted Signals (10-min Arkiv TTL)
   const handlePlaceOrderAndSignal = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (networkMode === 'BASE_MAINNET') {
+      await executeBaseMainnetLeaderFlow(e)
+      return
+    }
+    if (!scope || !navigator.locks) { setErrorMessage('Link your wallet and use a browser with Web Locks support.'); return }
+    await navigator.locks.request(`${scopeKey(scope)}:leader-execution`, { mode: 'exclusive', ifAvailable: true }, async lock => {
+      if (!lock) { setErrorMessage('This leader trade is already running in another tab.'); return }
+      await executeLeaderFlow(e)
+    })
+  }
+  const executeLeaderFlow = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (submittingRef.current) return
 
     if (!user?.walletAddress) {
       setErrorMessage('Please connect your MetaMask wallet before placing leader trades.')
@@ -169,11 +426,34 @@ export default function LeaderTerminalPage() {
     }
 
     try {
+      submittingRef.current = true
       setIsSubmitting(true)
       setErrorMessage(null)
       setTradeLogs([])
+      setStep('funding')
+      setStepMessage('Checking shielded funds and creating a local burnerâ¦')
+
+      const funding = await import('@/lib/shielded/tradeFunding')
+      const currentScope = { userId: user.id, walletAddress: user.walletAddress }
+      const inputs = JSON.stringify({ symbol, side, orderType, limit, amount, stopLoss, target })
+      let burner = burnerRef.current || funding.loadTradingBurner(currentScope)
+      if (burner && burner.stage === 'closed') burner = null
+      if (burner && burner.inputs !== inputs) throw new Error('A saved trade already has a burner. Restore its original parameters to resume funding; its key has been retained.')
+      if (burner?.stage === 'open') throw new Error('This position is already open. Use its exit control before starting a new position.')
+      if (burner?.stage === 'entry-pending') throw new Error('An entry may already be submitted. Inspect this burner on Etherscan before retrying; automatic duplicate execution is blocked.')
+      if (!burner) {
+        await requireArtifactsReady()
+        const quote = await funding.quoteTradeFunding(amount)
+        burner = funding.createTradingBurner(currentScope, inputs, quote)
+      }
+      burnerRef.current = burner
+      setBurnerAddress(burner.address)
+      await funding.fundTradingBurner(currentScope, burner, message => { setStepMessage(message); setFundingQuote({ ...burner.quote }); addTradeLog('info', message) })
+      funding.assertTradeScope(currentScope)
+      setFundingEvidence({ operation: burner.userOpHash, transaction: burner.fundingTxHash })
+      addTradeLog('success', `Burner ${burner.address} funded through Pimlico.`, burner.fundingTxHash ? { label: 'Funding receipt', url: `https://sepolia.etherscan.io/tx/${burner.fundingTxHash}` } : undefined)
       setStep('promising')
-      setStepMessage('Sealing Trade Promise on Arkiv Rabdi testnet...')
+      setStepMessage('Funding confirmed. Sealing the trade promiseâ¦')
 
       const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
       const wethPos = 0.001
@@ -188,14 +468,14 @@ export default function LeaderTerminalPage() {
         amount: usdcCapital,
         stopLoss: Number(stopLoss),
         target: Number(target),
-        burnerAccountAddress: burnerAddress || LEADER_BURNER_ADDRESS,
+        burnerAccountAddress: burner.address,
       }
 
       console.log('[Terminal] Step 1: Requesting Promise Commitment from /api/trades/promise...')
       addTradeLog('info', `Sealing sequential Trade Promise on Arkiv Rabdi testnet...`)
 
       // Step 1: Trigger /promise API
-      const promiseRes = await api.post('/api/trades/promise', tradePayload)
+      const promiseRes = burner.promise ? { data: { success: true, ...burner.promise } } : await api.post('/api/trades/promise', tradePayload)
       if (!promiseRes.data?.success) {
         throw new Error(promiseRes.data?.error || 'Failed to seal trade promise')
       }
@@ -207,6 +487,8 @@ export default function LeaderTerminalPage() {
         arkivEntityKey: promiseRes.data.arkivEntityKey,
       }
       setPromiseData(pData)
+      burner.promise = pData
+      funding.saveTradingBurner(currentScope, burner)
 
       console.log('[Terminal] Promise Committed with Sequential Index:', pData)
       if (pData.arkivEntityKey) {
@@ -245,11 +527,14 @@ export default function LeaderTerminalPage() {
 
       // Step 2: Real Onchain Execution on Ethereum Sepolia
       setStep('executing_onchain')
-      setStepMessage('Executing real onchain two-leg swap (USDC ↔ WETH) on Ethereum Sepolia...')
-      addTradeLog('onchain', `Executing atomic two-leg swap on Ethereum Sepolia via burner ${truncateHash(LEADER_BURNER_ADDRESS, 6)}...`)
+      setStepMessage('Executing real onchain two-leg swap (USDC â WETH) on Ethereum Sepolia...')
+      addTradeLog('onchain', `Executing two-leg transfer demo on Ethereum Sepolia via burner ${truncateHash(burner.address, 6)}...`)
+      funding.assertTradeScope(currentScope)
+      burner.stage = 'entry-pending'
+      funding.saveTradingBurner(currentScope, burner)
 
       const onchainRes = await executeTwoLegEntrySwap({
-        traderKey: LEADER_BURNER_KEY,
+        traderKey: burner.privateKey,
         usdcAmountNumber: usdcCapital,
         wethAmountNumber: wethPos,
         onLog: (msg) => {
@@ -262,6 +547,9 @@ export default function LeaderTerminalPage() {
         },
       })
       setOnchainResult(onchainRes)
+      burner.entry = onchainRes
+      burner.stage = 'open'
+      funding.saveTradingBurner(currentScope, burner)
 
       addTradeLog(
         'onchain',
@@ -287,7 +575,7 @@ export default function LeaderTerminalPage() {
           entryPrice: `$${limit}`,
           takeProfitTarget: `$${target} (+${targetGainPct}% / +$${targetGainUsdc} USDC)`,
           stopLossTarget: `$${stopLoss} (-${stopLossRiskPct}% / -$${stopLossRiskUsdc} USDC)`,
-          unrealizedPnL: `+$${(usdcCapital * 0.0283).toFixed(2)} USDC (+2.83% Mark)`,
+          unrealizedPnL: 'Not calculated: no live mark-price feed',
           blockNumber: onchainRes.blockNumber,
           gasUsed: onchainRes.gasUsed,
           settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
@@ -310,12 +598,14 @@ export default function LeaderTerminalPage() {
           payloadHash: pData.payloadHash,
           promiseId: pData.promiseId,
           executionTxHash: onchainRes.leg1TxHash,
+          entryDeliveryTxHash: onchainRes.leg2TxHash,
           isCopyTrade: false,
         }),
         api.post('/api/trades/signal', {
           ...tradePayload,
           tradeIndex: pData.tradeIndex,
           payloadHash: pData.payloadHash,
+          promiseId: pData.promiseId,
         }),
       ])
 
@@ -327,6 +617,9 @@ export default function LeaderTerminalPage() {
         tradeId: execRes.data.tradeId,
         executionTxHash: onchainRes.leg1TxHash,
       })
+      burner.tradeId = execRes.data.tradeId
+      funding.saveTradingBurner(currentScope, burner)
+      window.dispatchEvent(new Event('syndicate:trades-changed'))
 
       addTradeLog('success', `Order fill recorded in protocol state (orderType: BRACKET)`)
 
@@ -359,82 +652,46 @@ export default function LeaderTerminalPage() {
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string }
       console.error('[Terminal] Error in order lifecycle:', e)
+      if (e?.message?.toLowerCase().includes('proof file')) {
+        setProofReady(false)
+        setProofMessage(e.message)
+      }
       setErrorMessage(e?.response?.data?.error || e?.message || 'Trade flow failed')
       addTradeLog('warn', `Error: ${e?.response?.data?.error || e?.message || 'Trade flow failed'}`)
       setStep('error')
     } finally {
+      submittingRef.current = false
       setIsSubmitting(false)
     }
   }
 
-  // Trigger onchain exit settlement (Take-Profit hit at $3,350)
-  const handleTriggerTakeProfitExit = async () => {
+  const handleLeaderExit = async (exit: 'tp' | 'sl') => {
+    if (isExiting || exitResult) return
+    setIsExiting(true); setErrorMessage(null)
     try {
-      setIsExiting(true)
-      setErrorMessage(null)
-      const usdcCapital = Number(amount) > 0 ? Number(amount) : 3.00
-      const grossUsdc = Number((usdcCapital * 1.1167).toFixed(2)) // +11.67% target
-      const feeUsdc = Number((usdcCapital * 0.003).toFixed(2)) // 30 bps protocol fee
-      const profitUsdc = Number((usdcCapital * 1.113).toFixed(2)) // 11.3% net profit released
-      const netProfitAmount = Number((profitUsdc - usdcCapital).toFixed(2))
-
-      addTradeLog('info', `Take-Profit Trigger Hit ($3,350.00): Initiating onchain exit settlement...`)
-      addTradeLog('onchain', `Returning 0.001 WETH position to FlashTradePool Vault...`)
-
-      const exitReceipt = await executeTwoLegExitSwap({
-        traderKey: LEADER_BURNER_KEY,
-        wethAmountNumber: 0.001,
-        usdcReturnAmountNumber: profitUsdc,
-        onLog: (msg) => {
-          console.log(`[Exit Settlement] ${msg}`)
-          if (msg.includes('Leg 1: Returned WETH position to Vault')) {
-            addTradeLog('onchain', `Leg 1: WETH returned to Vault (Tx mined on Sepolia)`)
-          } else if (msg.includes('Leg 2: Vault released USDC with profit')) {
-            addTradeLog('onchain', `Leg 2: Vault released $${profitUsdc.toFixed(2)} USDC to Burner`)
-          }
-        },
-      })
-
-      setExitResult(exitReceipt)
+      const tradeId = executionResult?.tradeId || burnerRef.current?.tradeId
+      if (!scope || !tradeId || !burnerRef.current) throw new Error('Open Trade History and recover this local entry before exiting.')
+      const settled = await closeTrade(scope, tradeId, exit, message => addTradeLog('onchain', message))
+      setExitResult(settled.receipt)
+      burnerRef.current.stage = 'closed'
+      const funding = await import('@/lib/shielded/tradeFunding')
+      funding.saveTradingBurner(scope, burnerRef.current)
+      addTradeLog('success', `Exit confirmed. Realized P/L: ${usdc(settled.trade.realizedPnlUnits)} USDC before native gas.`, { label: 'USDC payout', url: settled.receipt.leg2ExplorerUrl })
       await loadBalances()
-      setTimeout(() => { loadBalances() }, 2500)
-
-      addTradeLog(
-        'success',
-        `Exit Settled Onchain! Realized Net Profit: +$${netProfitAmount.toFixed(2)} USDC (+11.30%)`,
-        { label: 'Etherscan USDC Release', url: exitReceipt.leg2ExplorerUrl }
-      )
-
-      // Log Exit Settlement Event for Judges
-      logJudgeEvent({
-        category: 'EXIT_SETTLEMENT',
-        title: `Take-Profit Target Hit ($3,350) & Onchain Exit Settlement`,
-        details: {
-          wethPositionClosed: '0.001 WETH',
-          initialCapital: `$${usdcCapital.toFixed(2)} USDC`,
-          grossPayout: `$${grossUsdc.toFixed(2)} USDC (+11.67%)`,
-          protocolFee: `-$${feeUsdc.toFixed(2)} USDC (30 bps)`,
-          netUsdcReleased: `$${profitUsdc.toFixed(2)} USDC`,
-          realizedNetProfit: `+$${netProfitAmount.toFixed(2)} USDC (+11.30% Net)`,
-          blockNumber: exitReceipt.blockNumber,
-          gasUsed: exitReceipt.gasUsed,
-          settlementVault: '0xA360946725811DABB91C054A3DFF25eD25C005E8 (FlashTradePool)',
-        },
-        links: [
-          { label: `Etherscan Exit Leg 1 (WETH Return: ${truncateHash(exitReceipt.leg1TxHash, 6)})`, url: exitReceipt.leg1ExplorerUrl },
-          { label: `Etherscan Exit Leg 2 (USDC Profit Release: ${truncateHash(exitReceipt.leg2TxHash, 6)})`, url: exitReceipt.leg2ExplorerUrl },
-        ],
-      })
-    } catch (err: unknown) {
-      const e = err as Error
-      console.error('[Exit Settlement] Error:', e)
-      setErrorMessage(`Exit settlement failed: ${e.message}`)
-    } finally {
-      setIsExiting(false)
-    }
+    } catch (error) { setErrorMessage((error as Error).message) }
+    finally { setIsExiting(false) }
   }
+  const handleTriggerTakeProfitExit = () => handleLeaderExit('tp')
+  const handleTriggerStopLossExit = () => handleLeaderExit('sl')
 
   const handleReset = () => {
+    if (burnerRef.current && burnerRef.current.stage !== 'closed') {
+      setErrorMessage('This burner still has a pending funding operation or open position. Its saved keys and state must be recovered before starting another trade.')
+      return
+    }
+    burnerRef.current = null
+    setBurnerAddress('')
+    if (scope) localStorage.removeItem(`${scopeKey(scope)}:active-trade`)
     setStep('idle')
     setPromiseData(null)
     setOnchainResult(null)
@@ -493,6 +750,98 @@ export default function LeaderTerminalPage() {
             </div>
           </div>
         </div>
+
+        {/* Network Mode Switcher Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-border bg-surface-raised">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-[#0052FF]/15 flex items-center justify-center text-[#0052FF]">
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-text-primary flex items-center gap-2">
+                <span>Execution Network:</span>
+                {networkMode === 'BASE_MAINNET' ? (
+                  <Badge className="bg-[#0052FF]/20 text-[#0052FF] border-[#0052FF]/40 text-xs">
+                    🔵 Base Mainnet (Definitive Flash)
+                  </Badge>
+                ) : (
+                  <Badge variant="muted" className="text-text-muted text-xs">
+                    Ethereum Sepolia (Simulation Pool)
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-text-secondary mt-0.5">
+                {networkMode === 'BASE_MAINNET'
+                  ? 'Live institutional routing through Definitive Flash solver contracts on Base Mainnet. Promises seal on Arkiv Rabdi.'
+                  : 'Simulates atomic swap counterparty via FlashTradePool contract on Ethereum Sepolia.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-surface p-1 rounded-lg border border-border self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setNetworkMode('BASE_MAINNET')
+                setSymbol('WETH/USDC')
+                setAmount('0.50')
+              }}
+              className={`px-3.5 py-2 rounded-md text-xs font-bold transition-all ${
+                networkMode === 'BASE_MAINNET'
+                  ? 'bg-[#0052FF] text-white shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              🔵 Base Mainnet
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setNetworkMode('SEPOLIA_TESTNET')
+                setSymbol('ETH/USDC')
+                setAmount('3.00')
+              }}
+              className={`px-3.5 py-2 rounded-md text-xs font-bold transition-all ${
+                networkMode === 'SEPOLIA_TESTNET'
+                  ? 'bg-accent text-text-inverse shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              Sepolia Testnet
+            </button>
+          </div>
+        </div>
+
+        {networkMode === 'BASE_MAINNET' ? (
+          <Card><CardHeader><CardTitle>Base trading wallet</CardTitle><CardDescription>Select this account in MetaMask to approve tokens and sign your Definitive trade.</CardDescription></CardHeader>
+            <CardContent><a className="mono text-sm text-accent break-all" href={`${BASE_MAINNET_EXPLORER}/address/${BASE_LEADER_WALLET}`} target="_blank" rel="noopener noreferrer">{BASE_LEADER_WALLET}</a></CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader><CardTitle>Your shielded trading balance</CardTitle><CardDescription>Ethereum Sepolia · USDC capital and WETH for withdrawal fees and the burner's native gas reserve.</CardDescription></CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-md border border-border bg-surface-raised p-3 space-y-2">
+                <p className="text-sm font-semibold">Proof files · {proofReady ? 'Ready' : proofPreparing ? 'Preparing' : 'Preparation required'}</p>
+                <p role="status" aria-live="polite" className="text-xs text-text-secondary">{proofMessage}</p>
+                {!proofReady && <button type="button" onClick={() => void prepareProofFiles()} disabled={proofPreparing || isSubmitting} className="text-xs text-accent disabled:opacity-50">{proofPreparing ? 'Preparing…' : `Prepare proof files (${(artifactTotalBytes / 1048576).toFixed(0)} MiB, once)`}</button>}
+                <p className="text-xs text-text-muted">Public proving files are served by this app and saved in your browser. Keep this page open during preparation. They contain no wallet secrets.</p>
+              </div>
+              <div className="flex flex-wrap gap-6 items-center">
+                {['USDC', 'WETH'].map(token => <div key={token}><p className="text-xs text-text-muted">Private {token}</p><p className="mono tnum text-lg">{privateView?.balances.find(b => b.symbol === token)?.amount ?? '—'}</p></div>)}
+                <button type="button" disabled={poolLoading || isSubmitting} onClick={() => void refreshPrivate(true)} className="text-accent text-xs disabled:opacity-50">{poolLoading ? 'Synchronizing notes…' : 'Refresh private balance'}</button>
+                <Link to="/" className="text-accent text-xs underline">Top up on dashboard</Link>
+              </div>
+              {privateView && <p className="text-xs text-text-muted">Last synchronized: {new Date(privateView.syncedAt).toLocaleString()}{poolLoading ? ' · Updating in background…' : ''}. Funding always rechecks spendable notes.</p>}
+              {fundingQuote && <p className="text-xs text-text-secondary">Estimated requirement: {(Number(fundingQuote.grossUsdc) / 1e6).toFixed(6)} USDC + {formatEther(BigInt(fundingQuote.requiredWeth))} WETH. Includes {formatEther(BigInt(fundingQuote.nativeReserve))} ETH for entry/exit gas and a {formatEther(BigInt(fundingQuote.feeReserve))} WETH withdrawal reserve. Pimlico checks the operation estimate before submission.</p>}
+              {shortfall && <p role="alert" className="rounded-md p-3 border border-semantic-warning/40 text-semantic-warning text-sm">{shortfall} <Link to="/" className="underline">Please top up.</Link></p>}
+              {poolError && <p role="alert" className="text-semantic-warning text-xs">{poolError}</p>}
+              {rpcStatus && <p role="status" className="text-semantic-warning text-xs">{rpcStatus}</p>}
+              <p className="text-xs text-text-muted">On submit, a fresh burner is saved locally, signs its own funding UserOperation and receives funds through Pimlico. The promise is created after funding confirmation. Gas reserves are estimates; unused funds remain in the burner.</p>
+              {fundingEvidence.operation && <p className="mono text-xs break-all">Funding UserOperation: {fundingEvidence.operation}</p>}
+              {fundingEvidence.transaction && <a href={`https://sepolia.etherscan.io/tx/${fundingEvidence.transaction}`} target="_blank" rel="noopener noreferrer" className="text-accent text-xs underline">View confirmed funding transaction</a>}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Two-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -559,12 +908,13 @@ export default function LeaderTerminalPage() {
                   <div className="text-[10px] text-text-muted flex justify-between items-center pt-1 px-1 border-t border-border/60">
                     <span>FlashTradePool Vault Reserves:</span>
                     <span className="mono font-semibold text-text-secondary">
-                      {vaultBalances ? `$${parseFloat(vaultBalances.usdc).toFixed(2)} USDC • ${parseFloat(vaultBalances.weth).toFixed(4)} WETH` : 'Loading...'}
+                      {vaultBalances ? `$${parseFloat(vaultBalances.usdc).toFixed(2)} USDC â¢ ${parseFloat(vaultBalances.weth).toFixed(4)} WETH` : 'Loading...'}
                     </span>
                   </div>
                 </div>
 
-                <form onSubmit={handlePlaceOrderAndSignal} className="space-y-5">
+                <form onSubmit={handlePlaceOrderAndSignal}>
+                <fieldset disabled={isSubmitting} className="space-y-5">
                   
                   {/* Symbol Quick Pills */}
                   <div>
@@ -644,6 +994,7 @@ export default function LeaderTerminalPage() {
                           step="1"
                           min="0"
                           value={limit}
+                          readOnly={networkMode === 'BASE_MAINNET'}
                           onChange={(e) => setLimit(e.target.value)}
                           required
                           className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
@@ -654,15 +1005,15 @@ export default function LeaderTerminalPage() {
 
                     <div>
                       <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                        <span>Trading Capital (USDC)</span>
+                        <span>{networkMode === 'BASE_MAINNET' && side === 'SELL' ? 'Sell quantity (WETH)' : 'Trading Capital (USDC)'}</span>
                         <span className="text-[10px] text-accent font-bold">Currency: USDC</span>
                       </label>
                       <div className="relative">
                         <span className="absolute left-3.5 top-2.5 text-xs text-text-muted font-bold">$</span>
                         <input
                           type="number"
-                          step="0.10"
-                          min="0.10"
+                          step={networkMode === 'BASE_MAINNET' && side === 'SELL' ? '0.000001' : '0.10'}
+                          min={networkMode === 'BASE_MAINNET' && side === 'SELL' ? '0.000001' : '0.10'}
                           value={amount}
                           onChange={(e) => setAmount(e.target.value)}
                           required
@@ -673,7 +1024,7 @@ export default function LeaderTerminalPage() {
                       </div>
                       <p className="text-[11px] text-text-muted mt-1.5 flex justify-between">
                         <span>Capital: <strong className="text-text-primary font-bold">${amount} USDC</strong></span>
-                        <span>Acquiring: <strong className="text-accent mono font-bold">~0.001 WETH</strong></span>
+                        <span>Estimated output: <strong className="text-accent mono font-bold">{networkMode === 'BASE_MAINNET' ? definitiveQuote ? `${definitiveQuote.to.amount} ${side === 'BUY' ? 'WETH' : 'USDC'}` : 'Loading quote...' : '~0.001 WETH'}</strong></span>
                       </p>
                     </div>
                   </div>
@@ -691,6 +1042,7 @@ export default function LeaderTerminalPage() {
                           type="number"
                           step="1"
                           value={stopLoss}
+                          readOnly={networkMode === 'BASE_MAINNET'}
                           onChange={(e) => setStopLoss(e.target.value)}
                           className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
                         />
@@ -709,6 +1061,7 @@ export default function LeaderTerminalPage() {
                           type="number"
                           step="1"
                           value={target}
+                          readOnly={networkMode === 'BASE_MAINNET'}
                           onChange={(e) => setTarget(e.target.value)}
                           className="w-full pl-8 pr-16 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-sm mono tnum focus:border-accent focus:outline-none transition-colors"
                         />
@@ -720,26 +1073,15 @@ export default function LeaderTerminalPage() {
                   {/* Burner Account Address */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
+                      <p className="block text-xs font-semibold text-text-muted uppercase tracking-wider flex items-center gap-1.5">
                         <Flame className="w-3.5 h-3.5 text-accent" />
-                        <span>Burner Execution Account (Optional)</span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleGenerateBurner}
-                        className="text-[11px] font-semibold text-accent hover:underline flex items-center gap-1"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Generate Burner</span>
-                      </button>
+                        <span>{networkMode === 'BASE_MAINNET' ? 'Trading wallet' : 'Local per-trade burner'}</span>
+                      </p>
                     </div>
-                    <input
-                      type="text"
-                      placeholder="0x... (Execution burner wallet or leave blank to use connected wallet)"
-                      value={burnerAddress}
-                      onChange={(e) => setBurnerAddress(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-md bg-surface-raised border border-border text-text-primary text-xs mono tnum placeholder:text-text-muted focus:border-accent focus:outline-none transition-colors"
-                    />
+                    <div className="rounded-md bg-surface-raised border border-border px-3.5 py-3 space-y-2" role="status" aria-live="polite">
+                      <p className="text-xs text-text-secondary">{networkMode === 'BASE_MAINNET' ? `Base trading wallet: ${baseBurner.address}. Sign this trade with the matching MetaMask account.` : burnerAddress ? 'This tradeâs burner was created and saved on this device.' : 'A new burner will be created automatically when you submit this trade. Its address will appear here.'}</p>
+                      {burnerAddress && <p className="mono tnum text-xs text-accent break-all select-all">{burnerAddress}</p>}
+                    </div>
                   </div>
 
                   {errorMessage && (
@@ -751,21 +1093,40 @@ export default function LeaderTerminalPage() {
                   {/* Action Button */}
                   <button
                     type="submit"
-                    disabled={isSubmitting || !user?.walletAddress}
-                    className="w-full py-3.5 px-4 rounded-md font-bold text-xs text-text-inverse bg-accent hover:bg-[#d4f885] active:translate-y-0 transition-all duration-fast flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_14px_rgba(198,243,106,0.2)]"
+                    disabled={
+                      isSubmitting ||
+                      !user?.walletAddress ||
+                      (networkMode === 'BASE_MAINNET'
+                        ? false
+                        : (!proofReady && !burnerRef.current?.userOpHash && !burnerRef.current?.signedOperation) ||
+                          (!burnerRef.current && (!privateView || !fundingQuote || !!shortfall)))
+                    }
+                    className={`w-full py-3.5 px-4 rounded-md font-bold text-xs transition-all duration-fast flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                      networkMode === 'BASE_MAINNET'
+                        ? 'bg-[#0052FF] hover:bg-[#0045d8] text-white shadow-[0_2px_14px_rgba(0,82,255,0.25)]'
+                        : 'bg-accent hover:bg-[#d4f885] text-text-inverse shadow-[0_2px_14px_rgba(198,243,106,0.2)]'
+                    }`}
                   >
                     {isSubmitting ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin text-text-inverse" />
-                        <span>{stepMessage || 'Executing Real Onchain Swap & Dispatching Signals...'}</span>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>{stepMessage || 'Executing Flash Trade...'}</span>
+                      </>
+                    ) : networkMode === 'BASE_MAINNET' ? (
+                      <>
+                        <Zap className="w-4 h-4 fill-current stroke-[2.2]" />
+                        <span>
+                          {`Execute ${amount || '0.50'} ${side === 'BUY' ? 'USDC' : 'WETH'} via Definitive`}
+                        </span>
                       </>
                     ) : (
                       <>
                         <Radio className="w-4 h-4 text-text-inverse stroke-[2.2]" />
-                        <span>Commit Promise & Execute Real Onchain Flash Trade</span>
+                        <span>Fund Burner, Commit Promise & Execute Trade</span>
                       </>
                     )}
                   </button>
+                </fieldset>
                 </form>
               </CardContent>
             </Card>
@@ -779,15 +1140,20 @@ export default function LeaderTerminalPage() {
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-accent" />
-                  <CardTitle>Three-Step Execution Protocol</CardTitle>
+                  <CardTitle>{networkMode === 'BASE_MAINNET' ? 'Trade execution' : 'Funding & Execution Protocol'}</CardTitle>
                 </div>
                 <CardDescription>
-                  How the syndicate executes onchain without leaking the leader's identity.
+                  {networkMode === 'BASE_MAINNET' ? 'Execute directly from the fixed Base wallet through Definitive Flash.' : 'How the syndicate executes using a shielded-funded burner.'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3.5 text-xs">
                 
                 {/* Step 1 indicator */}
+                {networkMode === 'SEPOLIA_TESTNET' && <div className={`p-3.5 rounded-md border ${step === 'funding' ? 'border-accent bg-accent-soft' : 'border-border bg-surface-raised'}`}>
+                  <p className="font-semibold mb-1">0. Fund a fresh local burner through Pimlico</p>
+                  <p className="text-[11px]">The recipient burner signs the UserOperation. The pool supplies USDC and native gas; shielded WETH pays the withdrawal fee.</p>
+                  {step === 'funding' && <p role="status" className="text-xs text-accent mt-2">{stepMessage}</p>}
+                </div>}
                 <div className={`p-3.5 rounded-md border transition-all ${
                   step === 'promising'
                     ? 'bg-accent-soft border-accent text-text-primary'
@@ -821,7 +1187,7 @@ export default function LeaderTerminalPage() {
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5 text-accent" />
-                      2. Real Onchain Sepolia Flash Swap
+                      {networkMode === 'BASE_MAINNET' ? '2. Approve & execute on Base' : '2. Sepolia transfer demo'}
                     </span>
                     {step === 'executing_onchain' && <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />}
                     {(step === 'signaling' || step === 'completed') && (
@@ -829,7 +1195,7 @@ export default function LeaderTerminalPage() {
                     )}
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Two-leg atomic swap: Burner transfers USDC to FlashTradePool Vault; Vault delivers WETH position to Burner.
+                    {networkMode === 'BASE_MAINNET' ? 'The fixed wallet approves tokens and signs Definitive orders in MetaMask. Actual settlement is confirmed before signaling.' : 'Burner transfers USDC to the demo vault; the vault transfers WETH to the burner.'}
                   </p>
                 </div>
 
@@ -927,96 +1293,13 @@ export default function LeaderTerminalPage() {
                     </div>
                   )}
 
-                  {/* Trade Profit & Loss (PnL) Panel */}
-                  {onchainResult && (
-                    <div className="p-3.5 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 shadow-sm text-zinc-950 dark:text-zinc-100 space-y-2.5">
-                      <div className="flex items-center justify-between pb-1.5 border-b border-zinc-300 dark:border-zinc-800">
-                        <div className="flex items-center gap-1.5">
-                          <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-accent" />
-                          <span className="text-xs font-black uppercase tracking-wider text-zinc-950 dark:text-white">
-                            Profit / Loss (PnL) & Settlement
-                          </span>
-                        </div>
-                        {exitResult ? (
-                          <span className="text-[10px] px-2 py-0.5 rounded font-black bg-emerald-100 text-emerald-950 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                            TAKE-PROFIT SETTLED
-                          </span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-0.5 rounded font-black bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
-                            POSITION ACTIVE
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Capital & Position Summary */}
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="p-2 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                          <div className="text-[10px] font-bold text-zinc-700 dark:text-zinc-400 uppercase">Capital Invested</div>
-                          <div className="text-sm font-black text-zinc-950 dark:text-white mono">
-                            ${Number(amount || 100).toFixed(2)} USDC
-                          </div>
-                        </div>
-
-                        <div className="p-2 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                          <div className="text-[10px] font-bold text-zinc-700 dark:text-zinc-400 uppercase">Position Size</div>
-                          <div className="text-sm font-black text-zinc-950 dark:text-white mono">
-                            0.001 WETH
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Dynamic PnL Breakdown */}
-                      {exitResult ? (
-                        <div className="p-2.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 space-y-1.5">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-bold text-zinc-950 dark:text-zinc-200">Realized Net Profit:</span>
-                            <span className="mono font-black text-emerald-800 dark:text-emerald-300 text-sm">
-                              +${(Number(amount || 100) * 0.113).toFixed(2)} USDC (+11.30% Net)
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px] text-zinc-700 dark:text-zinc-300">
-                            <span>Gross Return:</span>
-                            <span className="mono font-semibold text-zinc-900 dark:text-zinc-200">
-                              ${(Number(amount || 100) * 1.1167).toFixed(2)} USDC
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px] text-zinc-700 dark:text-zinc-300">
-                            <span>Protocol Fee (30 bps):</span>
-                            <span className="mono font-semibold text-zinc-900 dark:text-zinc-200">
-                              -${(Number(amount || 100) * 0.003).toFixed(2)} USDC
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px] text-zinc-900 dark:text-zinc-200 pt-1 border-t border-emerald-200 dark:border-emerald-800 font-bold">
-                            <span>Net Payout to Burner:</span>
-                            <span className="mono font-black text-emerald-900 dark:text-emerald-200">
-                              ${(Number(amount || 100) * 1.113).toFixed(2)} USDC
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-2.5 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 space-y-1.5 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold text-zinc-900 dark:text-zinc-200">Unrealized Mark PnL:</span>
-                            <span className="mono font-black text-emerald-700 dark:text-emerald-400">
-                              +${(Number(amount || 100) * 0.0283).toFixed(2)} USDC (+2.83%)
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-zinc-700 dark:text-zinc-400">Target Profit (@ ${target}):</span>
-                            <span className="mono font-bold text-emerald-700 dark:text-emerald-400">
-                              +${(Number(amount || 100) * (Number(target || 3350) - Number(limit || 3000)) / Number(limit || 3000)).toFixed(2)} USDC (+{(((Number(target || 3350) - Number(limit || 3000)) / Number(limit || 3000)) * 100).toFixed(1)}%)
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-zinc-700 dark:text-zinc-400">Stop Loss Risk (@ ${stopLoss}):</span>
-                            <span className="mono font-bold text-red-600 dark:text-red-400">
-                              -${(Number(amount || 100) * (Number(limit || 3000) - Number(stopLoss || 2900)) / Number(limit || 3000)).toFixed(2)} USDC (-{(((Number(limit || 3000) - Number(stopLoss || 2900)) / Number(limit || 3000)) * 100).toFixed(1)}%)
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {networkMode === 'BASE_MAINNET' && executionResult?.tradeId && <BaseTradeStatus tradeId={executionResult.tradeId} />}
+                  {onchainResult && <div className="p-3.5 rounded-md bg-surface-raised border border-border space-y-2 text-sm">
+                    <p className="font-semibold">Position & realized result</p>
+                    <p>Entry: {onchainResult.usdcAmount} USDC · Position: {onchainResult.wethAmount} WETH</p>
+                    {exitResult ? <><p>Confirmed payout: {exitResult.usdcAmount} USDC</p><p>Realized P/L: {(Number(exitResult.usdcAmount) - Number(onchainResult.usdcAmount)).toFixed(6)} USDC before native gas.</p></> : <p className="text-text-muted">Position open. Live unrealized P/L is unavailable.</p>}
+                    <Link to="/history" className="text-accent underline text-xs">Full receipts, gas and promise claim</Link>
+                  </div>}
 
                   {/* Interactive Terminal Audit Logs (High Contrast Dark Box) */}
                   {tradeLogs.length > 0 && (
@@ -1112,7 +1395,7 @@ export default function LeaderTerminalPage() {
                   )}
 
                   {/* Interactive Exit Settlement Trigger */}
-                  <div className="pt-2 border-t border-border space-y-2">
+                  <div className={networkMode === 'BASE_MAINNET' ? 'hidden' : 'pt-2 border-t border-border space-y-2'}>
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-text-primary">Simulate Market Trigger</span>
                       <span className="text-[10px] text-semantic-success font-semibold">Active: 0.001 WETH</span>
@@ -1121,7 +1404,7 @@ export default function LeaderTerminalPage() {
                     <button
                       type="button"
                       onClick={handleTriggerTakeProfitExit}
-                      disabled={isExiting || Boolean(exitResult)}
+                      disabled={networkMode === 'BASE_MAINNET' || isExiting || Boolean(exitResult)}
                       className="w-full py-2.5 px-3 rounded-md bg-semantic-success/20 hover:bg-semantic-success/30 border border-semantic-success/50 text-semantic-success font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
                     >
                       {isExiting ? (
@@ -1132,20 +1415,23 @@ export default function LeaderTerminalPage() {
                       ) : exitResult ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-semantic-success" />
-                          <span>Take-Profit Trigger Executed & Closed</span>
+                          <span>Position Closed</span>
                         </>
                       ) : (
                         <>
                           <TrendingUp className="w-3.5 h-3.5" />
-                          <span>Trigger Bull Exit: Take-Profit ($3,350)</span>
+                          <span>Trigger Bull Exit: Take-Profit (${target})</span>
                         </>
                       )}
                     </button>
 
+                    <button type="button" onClick={handleTriggerStopLossExit} disabled={networkMode === 'BASE_MAINNET' || isExiting || Boolean(exitResult)} className="w-full py-2.5 px-3 rounded-md bg-semantic-danger/15 border border-semantic-danger/50 text-semantic-danger font-bold text-xs disabled:opacity-50">Trigger Bear Exit: Stop-Loss (${stopLoss})</button>
+                    <Link to="/history" className="block text-xs text-accent underline">View history, realized P/L & Claim Promise</Link>
                     {exitResult && (
                       <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-zinc-950 dark:text-zinc-100 space-y-1.5 shadow-sm">
                         <div className="text-[11px] font-black text-emerald-900 dark:text-emerald-300 flex items-center justify-between">
-                          <span>✅ Exit Settlement Confirmed Onchain!</span>
+                          <span>â
+ Exit Settlement Confirmed Onchain!</span>
                           <span className="mono tnum text-[10px] font-bold">Block #{exitResult.blockNumber}</span>
                         </div>
                         <div className="flex justify-between items-center text-[12px]">
@@ -1190,7 +1476,7 @@ export default function LeaderTerminalPage() {
 
         </div>
       </div>
+      {/* Fund Base Burner Modal */}
     </div>
   )
 }
-
