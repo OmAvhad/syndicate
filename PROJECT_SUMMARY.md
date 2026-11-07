@@ -3,6 +3,10 @@
 **Updated:** 7 November 2026  
 **Project:** Shielded copy-trading proof of concept
 
+## Base mainnet demo update
+
+Base now trades directly from the fixed leader/follower wallets supplied for the demo. The UI shows their addresses, and MetaMask handles approvals and Definitive signatures. There is no Base funding widget, fresh-burner creation or Pimlico preparation in this mode. BUY trades retain live protective exits at reference +/-0.05%, actual receipt verification, history/P&L and promise-result linking. Sepolia retains the shielded pool/Pimlico flow. See [BASE_MAINNET_DEMO.md](BASE_MAINNET_DEMO.md).
+
 ## What the project does
 
 The web app demonstrates a trusted leader publishing a trade signal and followers copying it. It combines a Kohaku/Railgun shielded pool for deposits and private withdrawals with a Pimlico UserOperation flow and a testnet trade-vault demo.

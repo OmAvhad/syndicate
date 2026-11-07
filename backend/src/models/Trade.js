@@ -65,6 +65,7 @@ const tradeSchema = new mongoose.Schema(
     },
     definitiveOrderId: String,
     definitiveQuoteId: String,
+    bracketOrderId: String,
     burnerAccountAddress: {
       type: String,
       lowercase: true,
@@ -101,7 +102,7 @@ const tradeSchema = new mongoose.Schema(
     promisePayload: mongoose.Schema.Types.Mixed,
     promiseLeaderAddress: String,
     promiseEntityKey: String,
-    exitType: { type: String, enum: ['tp', 'sl'] },
+    exitType: { type: String, enum: ['tp', 'sl', 'protective'] },
     exitPrice: Number,
     exitReturnTxHash: String,
     exitPayoutTxHash: String,

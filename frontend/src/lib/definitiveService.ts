@@ -1,14 +1,14 @@
 import {
-  createWalletClient,
-  http,
   type Address,
   type Hex,
-  maxUint256,
+  parseUnits,
+  erc20Abi,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { base } from 'viem/chains'
+import { prepareBaseUserOperation, readBaseTrade, saveBaseTrade } from './basePimlico'
 import {
-  BASE_MAINNET_RPC,
+  baseTradeKeyForSigning,
   BASE_WETH,
   BASE_USDC,
   baseMainnetPublicClient,
@@ -21,7 +21,9 @@ export const DEFINITIVE_API_KEY = 'dpka_513a2bd7_57a2_46d2_927b_2a3857fe271b'
 export const DEFINITIVE_ALLOWANCE_CONTRACT: Address = '0x5d00000873b6BF41539e6f5365B0Ff7d3c368f78'
 export const DEFINITIVE_VAULT_CONTRACT: Address = '0x1074393effFCf1A15e306cD3931F48eDA9ABcd55'
 
+export interface BracketLevels { referencePrice: number; takeProfit: string; stopLoss: string }
 export interface DefinitiveQuoteParams {
+  bracketLevels?: BracketLevels
   targetAsset: Address
   contraAsset: Address
   side: 'buy' | 'sell'
@@ -30,6 +32,8 @@ export interface DefinitiveQuoteParams {
 }
 
 export interface DefinitiveQuoteResponse {
+  demoLevels?: BracketLevels
+  attachedBracket?: { evm: { orderTypedData: string; permitTypedData?: string | null }; salt: string; deadline: string; signedMaxFromAmount: string }
   quoteId: string
   bridgeQuoteId: string | null
   orderType: string
@@ -61,6 +65,9 @@ export interface DefinitiveQuoteResponse {
 }
 
 export interface DefinitiveOrderParams {
+  signProtection?: (typedData: string) => Promise<Hex>
+  protectedQuote?: DefinitiveQuoteResponse
+  quoteId: string
   targetAsset: Address
   contraAsset: Address
   side: 'buy' | 'sell'
@@ -81,47 +88,6 @@ export interface DefinitiveOrderResponse {
   [key: string]: unknown
 }
 
-const ERC20_ABI = [
-  {
-    name: 'allowance',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [
-      { name: 'owner', type: 'address' },
-      { name: 'spender', type: 'address' },
-    ],
-    outputs: [{ type: 'uint256' }],
-  },
-  {
-    name: 'approve',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [{ type: 'bool' }],
-  },
-  {
-    name: 'balanceOf',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ type: 'uint256' }],
-  },
-] as const
-
-const WETH_ABI = [
-  ...ERC20_ABI,
-  {
-    name: 'deposit',
-    type: 'function',
-    stateMutability: 'payable',
-    inputs: [],
-    outputs: [],
-  },
-] as const
-
 /**
  * Fetches an official Definitive Flash execution quote on Base Mainnet.
  */
@@ -130,6 +96,7 @@ export async function fetchDefinitiveQuote(
 ): Promise<DefinitiveQuoteResponse> {
   const res = await fetch(`${DEFINITIVE_API_URL}/quote`, {
     method: 'POST',
+    signal: AbortSignal.timeout(30000),
     headers: {
       'Content-Type': 'application/json',
       'x-definitive-api-key': DEFINITIVE_API_KEY,
@@ -141,6 +108,9 @@ export async function fetchDefinitiveQuote(
       contraChain: 'base',
       side: params.side,
       orderType: 'market',
+      evmUsePermit2: false,
+      forceMinimalAllowance: false,
+      ...(params.bracketLevels ? { attachedBracket: { takeProfit: { notionalPrice: params.bracketLevels.takeProfit }, stopLoss: { notionalPrice: params.bracketLevels.stopLoss } } } : {}),
       qty: params.qty,
       funderAddress: params.funderAddress,
     }),
@@ -150,7 +120,13 @@ export async function fetchDefinitiveQuote(
   if (!res.ok) {
     throw new Error(data.error?.message || `Quote request failed with status ${res.status}`)
   }
-  return data as DefinitiveQuoteResponse
+  if (params.side === 'buy' && !params.bracketLevels) {
+    const referencePrice = Number(data.to?.notional) / Number(data.to?.amount)
+    if (!Number.isFinite(referencePrice) || referencePrice <= 0) throw new Error('Live reference price unavailable.')
+    return fetchDefinitiveQuote({ ...params, bracketLevels: { referencePrice, takeProfit: (referencePrice * 1.0005).toFixed(4), stopLoss: (referencePrice * 0.9995).toFixed(4) } })
+  }
+  if (params.bracketLevels && !data.attachedBracket?.evm?.orderTypedData) throw new Error('Definitive did not return protective-order signing data.')
+  return { ...data, demoLevels: params.bracketLevels } as DefinitiveQuoteResponse
 }
 
 /**
@@ -162,6 +138,7 @@ export async function signDefinitiveOrder(
 ): Promise<Hex> {
   const account = privateKeyToAccount(burnerPk)
   const parsed = JSON.parse(orderTypedDataStr)
+  validateBaseOrder(parsed, account.address)
 
   // Remove EIP712Domain from types for viem compatibility
   const types = { ...parsed.types }
@@ -185,71 +162,15 @@ export async function signDefinitiveOrder(
 /**
  * Prepares the burner wallet before trade execution:
  * 1. If source token is WETH, checks WETH balance. If ETH is present but WETH is insufficient, wraps ETH to WETH.
- * 2. Checks token allowance to DefinitiveFlashAllowance contract (0x5d00...8f78). If insufficient, approves max allowance.
+ * 2. Checks token allowance to DefinitiveFlashAllowance contract (0x5d00...8f78). If insufficient, approves the quoted input and a bounded protective allowance through Pimlico.
  */
 export async function prepareBurnerForDefinitiveTrade(
   burnerPk: Hex,
   tokenAddress: Address,
-  requiredAmountWei: bigint
-): Promise<{ wrapped?: bigint; approved?: boolean }> {
-  const account = privateKeyToAccount(burnerPk)
-  const walletClient = createWalletClient({
-    account,
-    chain: base,
-    transport: http(BASE_MAINNET_RPC),
-  })
-
-  let wrapped: bigint | undefined
-  let approved = false
-
-  // 1. If token is WETH, check if we need to wrap ETH
-  if (tokenAddress.toLowerCase() === BASE_WETH.toLowerCase()) {
-    const currentWethBal = (await baseMainnetPublicClient.readContract({
-      address: BASE_WETH,
-      abi: WETH_ABI,
-      functionName: 'balanceOf',
-      args: [account.address],
-    }).catch(() => 0n)) as bigint
-
-    if (currentWethBal < requiredAmountWei) {
-      const deficit = requiredAmountWei - currentWethBal
-      const ethBal = await baseMainnetPublicClient.getBalance({ address: account.address })
-      
-      // Leave 0.00003 ETH for gas buffer
-      const gasBuffer = 30000000000000n
-      if (ethBal > deficit + gasBuffer) {
-        const wrapHash = await walletClient.writeContract({
-          address: BASE_WETH,
-          abi: WETH_ABI,
-          functionName: 'deposit',
-          value: deficit,
-        })
-        await baseMainnetPublicClient.waitForTransactionReceipt({ hash: wrapHash })
-        wrapped = deficit
-      }
-    }
-  }
-
-  // 2. Check and approve allowance if needed
-  const currentAllowance = (await baseMainnetPublicClient.readContract({
-    address: tokenAddress,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: [account.address, DEFINITIVE_ALLOWANCE_CONTRACT],
-  }).catch(() => 0n)) as bigint
-
-  if (currentAllowance < requiredAmountWei) {
-    const approveHash = await walletClient.writeContract({
-      address: tokenAddress,
-      abi: ERC20_ABI,
-      functionName: 'approve',
-      args: [DEFINITIVE_ALLOWANCE_CONTRACT, maxUint256],
-    })
-    await baseMainnetPublicClient.waitForTransactionReceipt({ hash: approveHash })
-    approved = true
-  }
-
-  return { wrapped, approved }
+  requiredAmountWei: bigint,
+  protectionAmount?: bigint
+): Promise<{ wrapped?: bigint; approved?: boolean; userOpHash?: Hex; transactionHash?: Hex }> {
+  return prepareBaseUserOperation(burnerPk, tokenAddress, requiredAmountWei, protectionAmount)
 }
 
 /**
@@ -258,13 +179,34 @@ export async function prepareBurnerForDefinitiveTrade(
 export async function submitDefinitiveOrder(
   params: DefinitiveOrderParams
 ): Promise<DefinitiveOrderResponse> {
+  const saved = readBaseTrade(params.funderAddress)
+  if (saved.orderId) return waitForDefinitiveFill(saved.orderId, params.funderAddress)
+  if (saved.orderSubmissionStarted) throw new Error('An order submission is unresolved. Do not submit another trade; inspect the saved signed order and Definitive order history.')
+  const quote = params.protectedQuote
+  let attachedBracket: Record<string, string | { notionalPrice: string }> | undefined
+  if (params.side === 'buy') {
+    if (!quote?.attachedBracket || !quote.demoLevels) throw new Error('A signed protective order is required for the quick-exit BUY demo.')
+    const b = quote.attachedBracket
+    const keyRecord = localStorage.getItem(baseTradeKeyForSigning(params.funderAddress))
+    if (!keyRecord && !params.signProtection) throw new Error('Order signing wallet is unavailable.')
+    const parsed = JSON.parse(b.evm.orderTypedData)
+    validateBaseOrder(parsed, params.funderAddress)
+    if (parsed.message.fromToken.toLowerCase() !== BASE_WETH.toLowerCase() || parsed.message.toToken.toLowerCase() !== BASE_USDC.toLowerCase() || BigInt(parsed.message.fromAmount) !== parseUnits(b.signedMaxFromAmount, 18)) throw new Error('Protective-order assets or amount mismatch.')
+    const allowance = await baseMainnetPublicClient.readContract({ address: BASE_WETH, abi: erc20Abi, functionName: 'allowance', args: [params.funderAddress, DEFINITIVE_ALLOWANCE_CONTRACT] })
+    if (allowance < BigInt(parsed.message.fromAmount)) throw new Error('Protective WETH allowance is insufficient. Trading stopped.')
+    attachedBracket = { takeProfit: { notionalPrice: quote.demoLevels.takeProfit }, stopLoss: { notionalPrice: quote.demoLevels.stopLoss }, salt: b.salt, deadline: b.deadline, signedMaxFromAmount: b.signedMaxFromAmount, userSignature: params.signProtection ? await params.signProtection(b.evm.orderTypedData) : await signDefinitiveOrder(keyRecord as Hex, b.evm.orderTypedData) }
+  }
+  saveBaseTrade(params.funderAddress, { orderSubmissionStarted: new Date().toISOString(), signedOrder: JSON.stringify(params) })
   const res = await fetch(`${DEFINITIVE_API_URL}/order`, {
     method: 'POST',
+    signal: AbortSignal.timeout(30000),
     headers: {
       'Content-Type': 'application/json',
       'x-definitive-api-key': DEFINITIVE_API_KEY,
     },
     body: JSON.stringify({
+      ...(attachedBracket ? { attachedBracket } : {}),
+      quoteId: params.quoteId,
       targetChain: 'base',
       contraChain: 'base',
       targetAsset: params.targetAsset,
@@ -282,6 +224,44 @@ export async function submitDefinitiveOrder(
   if (!res.ok) {
     throw new Error(data.error?.message || `Order submission failed with status ${res.status}`)
   }
-  return data as DefinitiveOrderResponse
+  if (!data.orderId) throw new Error('Definitive did not return an order ID. Check the saved submission before retrying.')
+  saveBaseTrade(params.funderAddress, { orderId: data.orderId })
+  return waitForDefinitiveFill(data.orderId, params.funderAddress)
 }
 
+
+function validateBaseOrder(parsed: any, burner: Address) {
+  const eq = (a: unknown, b: string) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase()
+  const m = parsed.message
+  if (Number(parsed.domain?.chainId) !== base.id || !eq(parsed.domain?.verifyingContract, DEFINITIVE_ALLOWANCE_CONTRACT) || parsed.primaryType !== 'FlashOrder') throw new Error('Unexpected Definitive signing domain.')
+  if (!eq(m?.swapper, burner) || !eq(m?.recipient, burner) || !eq(m?.vault, DEFINITIVE_VAULT_CONTRACT)) throw new Error('Quote signer, recipient or vault mismatch.')
+  if (BigInt(m.deadline) <= BigInt(Math.floor(Date.now() / 1000) + 15)) throw new Error('Quote expired. Refresh before signing.')
+}
+export function quoteInput(quote: DefinitiveQuoteResponse, burner: Address, side: 'BUY' | 'SELL', qty: string) {
+  const parsed = JSON.parse(quote.evm.orderTypedData)
+  validateBaseOrder(parsed, burner)
+  const token = side === 'BUY' ? BASE_USDC : BASE_WETH
+  const output = side === 'BUY' ? BASE_WETH : BASE_USDC
+  const amount = parseUnits(qty, side === 'BUY' ? 6 : 18)
+  if (parsed.message.fromToken.toLowerCase() !== token.toLowerCase() || parsed.message.toToken.toLowerCase() !== output.toLowerCase() || BigInt(parsed.message.fromAmount) !== amount) throw new Error('Quote assets or spending amount do not match this trade.')
+  return { token, amount }
+}
+export async function waitForDefinitiveFill(orderId: string, funder: Address): Promise<DefinitiveOrderResponse> {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const response = await fetch(`${DEFINITIVE_API_URL}/orders/${encodeURIComponent(orderId)}?funderAddress=${funder}`, { signal: AbortSignal.timeout(20000), headers: { 'x-definitive-api-key': DEFINITIVE_API_KEY } })
+    if (!response.ok) throw new Error(`Order ${orderId} was submitted; confirmation is unavailable. Retry to resume, without placing another order.`)
+    const result = await response.json()
+    const status = result.order?.status || ''
+    const hashes = [...new Set<string>((result.fills || []).map((fill: { transactionId: string }) => fill.transactionId).filter((hash: string) => /^0x[0-9a-f]{64}$/i.test(hash)))]
+    if (hashes.length && (status === 'ORDER_STATUS_FILLED' || result.order?.closeReason === 'REASON_FULLY_FILLED')) {
+      if (hashes.length !== 1) throw new Error('This order has multiple fill transactions. Retain the order ID for reconciliation; automatic recording stopped.')
+      const receipt = await baseMainnetPublicClient.waitForTransactionReceipt({ hash: hashes[0] as Hex })
+      if (receipt.status !== 'success') throw new Error('Definitive settlement reverted.')
+      saveBaseTrade(funder, { fillTxHash: hashes[0], ...(result.order?.attachedBracket?.bracketOrderId ? { bracketOrderId: result.order.attachedBracket.bracketOrderId } : {}) })
+      return { orderId, status, txHash: hashes[0] }
+    }
+    if (/REJECTED|CANCELLED|EXPIRED|FAILED|TERMINATED/.test(status)) throw new Error(`Definitive order ${orderId}: ${status}. Inspect fills before starting another trade.`)
+    await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+  throw new Error(`Order ${orderId} is still pending. Retry to resume confirmation; your burner and order ID are saved.`)
+}

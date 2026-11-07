@@ -1,5 +1,15 @@
 # Syndicate integration progress and next steps
 
+## Fixed Base wallets — 7 November 2026
+
+Base now uses the supplied leader/follower addresses directly. Mainnet funding, pool-preview, sweep and rotation controls were removed. MetaMask approves tokens and signs Definitive entry/protective orders for the corresponding fixed account. Base no longer creates or funds a burner or submits Pimlico preparation; the Sepolia shielded/Pimlico flow is retained. Receipt verification, automatic protection and history/results remain enabled. This supersedes the earlier Base burner flow below.
+
+
+## Base mainnet Pimlico and Definitive update — 7 November 2026
+
+A separate Base flow now automates fresh burner funding for both roles, uses recipient-signed self-funded Pimlico/EIP-7702 preparation, and submits real Definitive Flash intents. BUY entries attach live market exits at reference +/-0.05%, with no guaranteed trigger time. Base execution no longer fabricates receipt hashes or verified quantities; backend checks actual settlement and protective exit transfers, and history/success panels reconcile actual P/L. The shielded pool remains on Sepolia, and the UI identifies Base funding as public. Wallet balances and unsigned quote/contract/bundler preflights were checked without moving funds. See [BASE_MAINNET_DEMO.md](BASE_MAINNET_DEMO.md).
+
+
 ## History, exits and claims update — 7 November 2026
 
 Leader bear exits, a persistent follower success dialog with both exits, and `/history` for both roles are implemented. New records verify actual entry/exit transfers and show realized USDC P/L separately from native gas. `Claim Promise` verifies the original Arkiv commitment and publishes/reuses a post-trade result claim; claimed status is read from Arkiv, with unknown states blocked. Earlier Markdown described commitments but no claim-state protocol, so `trade_result_claims` is new. See [TRADE_HISTORY.md](TRADE_HISTORY.md) for behavior and legacy-data limitations.

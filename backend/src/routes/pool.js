@@ -14,9 +14,11 @@ function rpcError(req, res, code, message, data) {
 router.post('/session', auth, (req, res) => {
   if (!process.env.PIMLICO_API_KEY) return res.status(503).json({ error: 'PIMLICO_API_KEY is not configured on the backend.' });
   if (!/^0x[0-9a-f]{40}$/i.test(req.body.sender || '')) return res.status(400).json({ error: 'Invalid burner address.' });
+  const chainId = req.body.chainId ?? 11155111;
+  if (![11155111, 8453].includes(chainId)) return res.status(400).json({ error: 'Unsupported bundler chain.' });
   for (const [key, value] of sessions) if (value.expires < Date.now()) sessions.delete(key);
   const token = randomBytes(32).toString('hex');
-  sessions.set(token, { sender: req.body.sender.toLowerCase(), expires: Date.now() + 30 * 60_000, calls: 0 });
+  sessions.set(token, { sender: req.body.sender.toLowerCase(), chainId, expires: Date.now() + 30 * 60_000, calls: 0 });
   res.json({ path: `/api/pool/bundler/${token}` });
 });
 router.post('/bundler/:token', async (req, res) => {
@@ -29,7 +31,7 @@ router.post('/bundler/:token', async (req, res) => {
     return rpcError(req, res, -32602, 'Operation sender must match the trading burner.');
   }
   try {
-    const response = await axios.post(`https://api.pimlico.io/v2/sepolia/rpc?apikey=${encodeURIComponent(process.env.PIMLICO_API_KEY)}`, req.body, {
+    const response = await axios.post(`https://api.pimlico.io/v2/${session.chainId}/rpc?apikey=${encodeURIComponent(process.env.PIMLICO_API_KEY)}`, req.body, {
       timeout: 120_000, httpsAgent: pimlicoAgent, validateStatus: () => true,
     });
     const body = response.data;

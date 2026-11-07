@@ -1,3 +1,4 @@
+import { BASE_LEADER_WALLET, BASE_FOLLOWER_WALLET } from '@/lib/directBaseWallet'
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -5,7 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import WalletConnectButton from '@/components/WalletConnectButton'
 import { truncateHash } from '@/lib/utils'
 import { publicClient, USDC_SEPOLIA, ERC20_ABI, LEADER_BURNER_ADDRESS, FOLLOWER_BURNER_ADDRESS } from '@/lib/flashEngine'
-import { getOrCreateBaseBurner, fetchBaseMainnetBalances, BASE_MAINNET_EXPLORER } from '@/lib/baseBurner'
+import { fetchBaseMainnetBalances, BASE_MAINNET_EXPLORER } from '@/lib/baseBurner'
 import { readCachedBalance } from '@/lib/shielded/balanceCache'
 import { formatEther, formatUnits, type Address } from 'viem'
 import {
@@ -35,7 +36,7 @@ export default function DashboardBalanceCard({ userId, walletAddress }: Dashboar
   const [activeBurnerRole, setActiveBurnerRole] = useState<'base' | 'leader' | 'follower'>('base')
 
   // Base Mainnet Burner
-  const [baseBurner] = useState(() => getOrCreateBaseBurner())
+  const baseBurner = { address: walletAddress?.toLowerCase() === BASE_FOLLOWER_WALLET.toLowerCase() ? BASE_FOLLOWER_WALLET : BASE_LEADER_WALLET }
   const [baseBurnerBal, setBaseBurnerBal] = useState<{ eth: string; usdc: string } | null>(null)
   const [baseMainBal, setBaseMainBal] = useState<{ eth: string; usdc: string } | null>(null)
 

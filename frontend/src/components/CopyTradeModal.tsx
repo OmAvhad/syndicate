@@ -1,9 +1,12 @@
+import { BASE_FOLLOWER_WALLET, beginDirectBaseTrade, selectedBaseWallet, prepareDirectBaseTrade, signBaseWalletOrder } from '@/lib/directBaseWallet'
+import BaseTradeStatus from './BaseTradeStatus'
 import { useState, useEffect, useCallback } from 'react'
 import { parseUnits, formatEther } from 'viem'
 import { useSignals, TradeSignalItem } from '@/context/SignalContext'
 import { truncateHash } from '@/lib/utils'
 import { logJudgeEvent } from '@/lib/judgeLogger'
 import { useAuth } from '@/context/AuthContext'
+import { readBaseTrade, saveBaseTrade } from '@/lib/basePimlico'
 import { closeTrade, usdc } from '@/lib/tradeJournal'
 import { Link } from 'react-router-dom'
 import {
@@ -15,18 +18,16 @@ import {
   FOLLOWER_BURNER_ADDRESS,
 } from '@/lib/flashEngine'
 import {
-  getOrCreateBaseBurner,
   fetchBaseMainnetBalances,
-  fundBaseBurnerFromMetaMask,
   BASE_MAINNET_EXPLORER,
   BASE_WETH,
   BASE_USDC,
   type BaseBurnerBalances,
 } from '@/lib/baseBurner'
 import {
+  quoteInput,
+  waitForDefinitiveFill,
   fetchDefinitiveQuote,
-  signDefinitiveOrder,
-  prepareBurnerForDefinitiveTrade,
   submitDefinitiveOrder,
 } from '@/lib/definitiveService'
 import {
@@ -89,9 +90,8 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
   const [exitType, setExitType] = useState<'tp' | 'sl' | null>(null)
 
   const isBaseMainnet = signal.network === 'BASE_MAINNET'
-  const [baseBurner] = useState(() => getOrCreateBaseBurner())
+  const baseBurner = { address: BASE_FOLLOWER_WALLET }
   const [baseBalances, setBaseBalances] = useState<BaseBurnerBalances | null>(null)
-  const [isFundingBaseBurner, setIsFundingBaseBurner] = useState(false)
 
   const loadBaseBalances = useCallback(async () => {
     if (!isBaseMainnet) return
@@ -108,6 +108,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
   }, [loadBaseBalances])
 
   const loadFollowerBalance = useCallback(async () => {
+    if (isBaseMainnet) return
     try {
       setIsLoadingBalance(true)
       const bals = await fetchSepoliaBalances(FOLLOWER_BURNER_ADDRESS)
@@ -191,57 +192,40 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
       addCopyLog('info', `Initializing copy trade: ${signal.side} ${signal.symbol} @ $${signal.limit} (Capital: $${numAmount.toFixed(2)} USDC)`)
 
       if (isBaseMainnet) {
-        addCopyLog('info', `Routing trade to Definitive Flash solvers on Base Mainnet...`)
-        addCopyLog('onchain', `Using follower Base burner: ${truncateHash(baseBurner.address, 6)}`)
-
-        const targetAsset = BASE_WETH
-        const contraAsset = BASE_USDC
-        const tradeQty = (signal.side === 'BUY' ? '0.0001' : String(numAmount)) || '0.0001'
-
-        const quote = await fetchDefinitiveQuote({
-          targetAsset,
-          contraAsset,
-          side: signal.side === 'BUY' ? 'buy' : 'sell',
-          qty: tradeQty,
-          funderAddress: baseBurner.address,
-        })
-
-        addCopyLog('success', `Definitive Quote: ${truncateHash(quote.quoteId, 6)} (Est. Output: ${quote.to.amount} ${signal.side === 'BUY' ? 'WETH' : 'USDC'})`)
-
-        // Prepare burner (auto wrap / approve)
-        const requiredWei = parseUnits(tradeQty, 18)
-        const prep = await prepareBurnerForDefinitiveTrade(baseBurner.privateKey, targetAsset, requiredWei)
-        if (prep.wrapped) addCopyLog('onchain', `Wrapped ${formatEther(prep.wrapped)} ETH to WETH on Base Mainnet.`)
-        if (prep.approved) addCopyLog('onchain', `Approved WETH to Definitive Flash Allowance contract.`)
-
-        // Sign order
-        const sig = await signDefinitiveOrder(baseBurner.privateKey, quote.evm.orderTypedData)
-        addCopyLog('info', `Signed EIP-712 FlashOrder with follower burner key ($0 gas)...`)
-
-        // Submit order
-        const orderRes = await submitDefinitiveOrder({
-          targetAsset,
-          contraAsset,
-          side: signal.side === 'BUY' ? 'buy' : 'sell',
-          qty: tradeQty,
-          funderAddress: baseBurner.address,
-          userSignature: sig,
-          evmOrderTypedData: quote.evm.orderTypedData,
-        })
-
-        const txHash = orderRes.txHash || `base_def_${orderRes.orderId || quote.quoteId}`
-        addCopyLog('success', `Definitive Flash Order Submitted on Base Mainnet! Status: ${orderRes.status || 'SUBMITTED'}`)
-
-        const res = await executeCopyTrade(signal.signalId, numAmount, txHash, undefined, baseBurner.address)
-        if (res.success && res.tradeId) {
-          setExecutionReceipt({ tradeId: res.tradeId })
-          addCopyLog('success', `Copy trade recorded in history (Trade ID: ${res.tradeId})`)
-        } else {
-          setErrorMessage(res.error || 'Failed to record copy execution')
+        if (!user?.walletAddress) throw new Error('Connect the follower funding wallet.')
+        if (!navigator.locks) throw new Error('Web Locks support is required for safe trade retries.')
+        return await navigator.locks.request(`syndicate:base-flow:${BASE_FOLLOWER_WALLET.toLowerCase()}`, { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error('A Base trade is already running in another tab.')
+        const burner = { address: BASE_FOLLOWER_WALLET }
+        await selectedBaseWallet(burner.address)
+        await beginDirectBaseTrade(burner.address)
+        const qty = String(numAmount)
+        const side = signal.side === 'BUY' ? 'buy' : 'sell'
+        let saved = readBaseTrade(burner.address)
+        const inputs = JSON.stringify({ signalId: signal.signalId, qty, side })
+        if (saved.inputs && saved.inputs !== inputs) throw new Error('Another trade is pending on this burner. Resume it before creating another.')
+        saveBaseTrade(burner.address, { inputs })
+        let quote = saved.quote && (saved.orderId || saved.orderSubmissionStarted) ? JSON.parse(saved.quote) : await fetchDefinitiveQuote({ targetAsset: BASE_WETH, contraAsset: BASE_USDC, side, qty, funderAddress: burner.address, bracketLevels: signal.side === 'BUY' ? { referencePrice: Number(signal.limit), takeProfit: String(signal.target), stopLoss: String(signal.stopLoss) } : undefined })
+        if (!saved.orderId && !saved.orderSubmissionStarted) {
+          const input = quoteInput(quote, burner.address, signal.side === 'BUY' ? 'BUY' : 'SELL', qty)
+          addCopyLog('onchain', 'Confirm token approvals in MetaMask for the fixed follower wallet.')
+          await prepareDirectBaseTrade(burner.address, input.token, input.amount, quote.attachedBracket ? parseUnits(quote.attachedBracket.signedMaxFromAmount, 18) : undefined)
+          quote = await fetchDefinitiveQuote({ targetAsset: BASE_WETH, contraAsset: BASE_USDC, side, qty, funderAddress: burner.address, bracketLevels: quote.demoLevels })
+          quoteInput(quote, burner.address, signal.side === 'BUY' ? 'BUY' : 'SELL', qty)
+          saveBaseTrade(burner.address, { quote: JSON.stringify(quote) })
         }
-
+        saved = readBaseTrade(burner.address)
+        addCopyLog('onchain', 'Waiting for actual Definitive settlement...')
+        const order = saved.orderId ? await waitForDefinitiveFill(saved.orderId, burner.address) : await submitDefinitiveOrder({ protectedQuote: quote, quoteId: quote.quoteId, targetAsset: BASE_WETH, contraAsset: BASE_USDC, side, qty, funderAddress: burner.address, signProtection: typed => signBaseWalletOrder(burner.address, typed), userSignature: await signBaseWalletOrder(burner.address, quote.evm.orderTypedData), evmOrderTypedData: quote.evm.orderTypedData })
+        if (!order.txHash) throw new Error('No confirmed Base settlement returned.')
+        const res = await executeCopyTrade(signal.signalId, numAmount, order.txHash, undefined, burner.address, order.orderId)
+        if (!res.success || !res.tradeId) throw new Error(res.error || 'Fill recording failed. Retry to resume.')
+        saveBaseTrade(burner.address, { recorded: 'true', tradeId: res.tradeId })
+        setExecutionReceipt({ tradeId: res.tradeId })
+        addCopyLog('success', 'Copy trade settled on Base and saved to history.', { label: 'Base settlement', url: `${BASE_MAINNET_EXPLORER}/tx/${order.txHash}` })
         await loadBaseBalances()
         return
+        })
       }
 
       // 1. Execute Real Onchain Flash Swap on Ethereum Sepolia for Follower
@@ -380,6 +364,8 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
           /* Execution Success State */
           <div className="space-y-4 text-center py-2 animate-fadeIn">
             <h4 className="text-lg font-bold text-semantic-success">Copy trade successful</h4>
+            {isBaseMainnet && executionReceipt.tradeId && <BaseTradeStatus tradeId={executionReceipt.tradeId} />}
+            {isBaseMainnet && <div className="text-sm space-y-2"><p>Real Base settlement confirmed. BUY trades use automatic Definitive take-profit / stop-loss orders at +/-0.05% from their live reference price.</p><p>Timing depends on market movement. Manual Sepolia exits are disabled for Base.</p>{readBaseTrade(baseBurner.address).fillTxHash && <a className="text-accent underline" target="_blank" rel="noopener noreferrer" href={`${BASE_MAINNET_EXPLORER}/tx/${readBaseTrade(baseBurner.address).fillTxHash}`}>View Base settlement</a>}</div>}
             {errorMessage && <p role="alert" className="text-sm text-semantic-danger">{errorMessage}</p>}
             {realizedPnl !== null && <p className="text-sm">Realized P/L: <strong>{realizedPnl} USDC</strong> before native gas.</p>}
             <Link to="/history" onClick={onClose} className="block text-sm text-accent underline">View history, P/L & Claim Promise</Link>
@@ -464,6 +450,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 </div>
               )}
 
+              {!isBaseMainnet && <>
               {/* Trade PnL & Position Metrics for Follower */}
               <div className="p-3 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 space-y-2 text-zinc-950 dark:text-zinc-100 shadow-sm">
                 <div className="flex items-center justify-between pb-1 border-b border-zinc-300 dark:border-zinc-800 text-[11px] font-black uppercase text-zinc-950 dark:text-white">
@@ -517,7 +504,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   <button
                     type="button"
                     onClick={handleTriggerTakeProfitExit}
-                    disabled={isExiting || Boolean(exitResult) || !executionReceipt.tradeId}
+                    disabled={isBaseMainnet || isExiting || Boolean(exitResult) || !executionReceipt.tradeId}
                     className="py-2.5 px-2 rounded-md bg-semantic-success/20 hover:bg-semantic-success/30 border border-semantic-success/50 text-semantic-success font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                   >
                     {isExiting && exitType === 'tp' ? (
@@ -541,7 +528,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                   <button
                     type="button"
                     onClick={handleTriggerStopLossExit}
-                    disabled={isExiting || Boolean(exitResult) || !executionReceipt.tradeId}
+                    disabled={isBaseMainnet || isExiting || Boolean(exitResult) || !executionReceipt.tradeId}
                     className="py-2.5 px-2 rounded-md bg-semantic-danger/15 hover:bg-semantic-danger/25 border border-semantic-danger/40 text-semantic-danger font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                   >
                     {isExiting && exitType === 'sl' ? (
@@ -585,6 +572,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
                 )}
               </div>
 
+              </>}
               {/* Follower Execution Logs & Audit Trail */}
               {copyLogs.length > 0 && (
                 <div className="p-3 rounded-lg bg-zinc-950 text-zinc-100 border border-zinc-800 shadow-md font-mono text-[10px] space-y-1">
@@ -834,48 +822,7 @@ export default function CopyTradeModal({ signal, onClose }: CopyTradeModalProps)
 
             {/* Follower Burner Account */}
             {isBaseMainnet ? (
-              <div className="p-3.5 rounded-lg bg-[#0052FF]/10 border border-[#0052FF]/30 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-[#0052FF] animate-pulse" />
-                    <div>
-                      <div className="text-[10px] uppercase font-bold text-[#0052FF]">Base Mainnet Follower Burner</div>
-                      <div className="mono font-bold text-text-primary text-[11px]">
-                        {truncateHash(baseBurner.address, 6)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] uppercase font-bold text-text-muted">Burner Balances</div>
-                    <div className="mono font-extrabold text-[#0052FF] text-xs">
-                      {baseBalances?.eth ?? '0.0000'} ETH · ${baseBalances?.usdc ?? '0.00'} USDC
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-[#0052FF]/20">
-                  <span className="text-[11px] text-text-secondary">Definitive Flash on Base Mainnet</span>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        setIsFundingBaseBurner(true)
-                        await fundBaseBurnerFromMetaMask(baseBurner.address, '0.0002')
-                        await loadBaseBalances()
-                      } catch (e: any) {
-                        setErrorMessage(e.message || 'Funding failed')
-                      } finally {
-                        setIsFundingBaseBurner(false)
-                      }
-                    }}
-                    disabled={isFundingBaseBurner}
-                    className="px-2.5 py-1 rounded bg-[#0052FF] text-white text-[11px] font-bold hover:bg-[#0045d8] transition-colors flex items-center gap-1 cursor-pointer"
-                  >
-                    {isFundingBaseBurner ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wallet className="w-3 h-3" />}
-                    <span>{isFundingBaseBurner ? 'Confirming...' : 'Fund Burner (0.0002 ETH)'}</span>
-                  </button>
-                </div>
-              </div>
+              <div className="p-3 rounded-lg border border-border text-xs space-y-2"><p className="font-bold">Base follower trading wallet</p><a className="mono text-accent break-all" target="_blank" rel="noopener noreferrer" href={`${BASE_MAINNET_EXPLORER}/address/${BASE_FOLLOWER_WALLET}`}>{BASE_FOLLOWER_WALLET}</a><p className="text-text-muted">Select this account in MetaMask to approve tokens and sign the trade.</p></div>
             ) : (
               <div className="p-3 rounded-lg bg-surface-raised border border-border flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">

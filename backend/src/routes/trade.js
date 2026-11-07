@@ -6,6 +6,7 @@ import Follow from '../models/Follow.js';
 import Trade from '../models/Trade.js';
 import TradeSignal from '../models/TradeSignal.js';
 import TradePromise from '../models/TradePromise.js';
+import { syncBaseTrade, verifyBaseExecution } from '../services/baseExecution.js';
 import { verifiedTransfer, VAULT, USDC, WETH, exitPayout, blockTimestamp } from '../services/tradeReceipts.js';
 import { claimTradeResult, readResultClaims, matchingClaim } from '../services/promiseClaims.js';
 import { hashTradePayload, encryptTradeSignal, decryptTradeSignal, encryptForMetaMask } from '../services/tradeCrypto.js';
@@ -149,11 +150,17 @@ router.post('/execute', async (req, res) => {
     if (existing) return res.json({ success: true, tradeId: existing._id, executionTxHash, status: existing.status });
     if (!/^0x[0-9a-f]{40}$/i.test(burnerAccountAddress)) return res.status(400).json({ error: 'The actual execution burner address is required.' });
 
-    let entry = { amount: BigInt(Math.round(Number(amount) * 1e6)), gasWei: '21000' };
-    let delivery = { amount: 100000000000000n, gasWei: '21000' };
+    let entry;
+    let delivery;
+    let baseFill;
     let entryTime = new Date();
 
-    if (!isBaseMainnet) {
+    if (isBaseMainnet) {
+      baseFill = await verifyBaseExecution(req.body.definitiveOrderId, executionTxHash, burnerAccountAddress, side, amount);
+      entry = { amount: baseFill.usdc, gasWei: baseFill.gasWei };
+      delivery = { amount: baseFill.weth };
+      entryTime = baseFill.time;
+    } else {
       entry = await verifiedTransfer(executionTxHash, USDC, burnerAccountAddress, VAULT);
       delivery = await verifiedTransfer(req.body.entryDeliveryTxHash, WETH, VAULT, burnerAccountAddress);
       if (BigInt(delivery.receipt.blockNumber) < BigInt(entry.receipt.blockNumber)) throw new Error('Position delivery predates entry.');
@@ -166,7 +173,7 @@ router.post('/execute', async (req, res) => {
     const sealed = !isCopyTrade ? await TradePromise.findOne({ promiseId, userId: currentUserId }) : null;
     if (sealed && sealed.payloadHash !== hashTradePayload(tradeData)) return res.status(400).json({ error: 'Execution parameters do not match the sealed promise.' });
     const hash = isCopyTrade ? sourceSignal.tradePayload.payloadHash : (sealed?.payloadHash || payloadHash || hashTradePayload(tradeData));
-    const executionPrice = Number(limit);
+    const executionPrice = isBaseMainnet ? Number(baseFill.usdc) / 1e6 / (Number(baseFill.weth) / 1e18) : Number(limit);
 
     // Save Trade record to MongoDB
     const entryRecord = {
@@ -176,6 +183,7 @@ router.post('/execute', async (req, res) => {
       network: isBaseMainnet ? 'BASE_MAINNET' : 'SEPOLIA_TESTNET',
       definitiveOrderId: req.body.definitiveOrderId || null,
       definitiveQuoteId: req.body.definitiveQuoteId || null,
+      bracketOrderId: baseFill?.bracketOrderId,
       symbol: tradeData.symbol,
       side: tradeData.side,
       orderType: tradeData.orderType,
@@ -191,7 +199,7 @@ router.post('/execute', async (req, res) => {
       promiseEntityKey: sealed?.arkivEntityKey,
       leaderId: sourceSignal?.leaderId,
       originalSignalId,
-      entryDeliveryTxHash: req.body.entryDeliveryTxHash || null,
+      entryDeliveryTxHash: isBaseMainnet ? executionTxHash : req.body.entryDeliveryTxHash || null,
       entryUsdcUnits: entry.amount.toString(),
       wethUnits: delivery.amount.toString(),
       entryGasWei: entry.gasWei,
@@ -529,11 +537,21 @@ router.get('/history', async (req, res) => {
   }
 });
 
+router.post('/:tradeId/sync-base', async (req, res) => {
+  try {
+    const trade = await Trade.findOne({ _id: req.params.tradeId, userId: req.user.userId });
+    if (!trade) return res.status(404).json({ error: 'Trade not found.' });
+    const updated = await syncBaseTrade(trade);
+    return res.json({ success: true, trade: updated });
+  } catch (error) { return res.status(400).json({ error: error.message || 'Base order status is unavailable. Retry without submitting another order.' }); }
+});
+
 router.post('/:tradeId/exit', async (req, res) => {
   try {
     const trade = await Trade.findOne({ _id: req.params.tradeId, userId: req.user.userId });
     if (!trade || !trade.receiptsVerified) return res.status(404).json({ error: 'A receipt-verified trade belonging to your account is required.' });
     if (trade.status === 'CLOSED') return res.json({ success: true, trade });
+    if (trade.network === 'BASE_MAINNET') return res.status(400).json({ error: 'Base exits execute through Definitive protective orders, not the Sepolia demo vault.' });
     const { exitType, exitReturnTxHash, exitPayoutTxHash } = req.body;
     if (!['tp', 'sl'].includes(exitType)) return res.status(400).json({ error: 'Choose bull/take-profit or bear/stop-loss.' });
     const price = exitType === 'tp' ? trade.target : trade.stopLoss;

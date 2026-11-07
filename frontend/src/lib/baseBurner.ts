@@ -14,13 +14,28 @@ import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 
 export const BASE_MAINNET_CHAIN_ID = 8453
 export const BASE_MAINNET_CHAIN_ID_HEX = '0x2105' // 8453 in hex
-export const BASE_MAINNET_RPC = 'https://mainnet.base.org'
+export const BASE_MAINNET_RPC = import.meta.env.VITE_BASE_RPC_URL || 'https://mainnet.base.org'
 export const BASE_MAINNET_EXPLORER = 'https://basescan.org'
 
 export const BASE_WETH: Address = '0x4200000000000000000000000000000000000006'
 export const BASE_USDC: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
-const STORAGE_KEY_BURNER = 'syndicate_base_mainnet_burner_pk'
+function burnerStorageKey() {
+  const user = JSON.parse(localStorage.getItem('world-id-user') || 'null')
+  return `syndicate:base:${user?.id || 'disconnected'}:${user?.walletAddress?.toLowerCase() || 'unlinked'}`
+}
+function archiveBurner(pk: Hex) {
+  const address = privateKeyToAccount(pk).address
+  localStorage.setItem(`${burnerStorageKey()}:burner:${address.toLowerCase()}`, pk)
+  if (localStorage.getItem(`${burnerStorageKey()}:burner:${address.toLowerCase()}`) !== pk) throw new Error('Unable to save burner recovery key.')
+}
+export function baseTradeKeyForSigning(address: Address) { return `${burnerStorageKey()}:burner:${address.toLowerCase()}` }
+export function baseTradeStorageKey(address: Address) { return `${burnerStorageKey()}:trade:${address.toLowerCase()}` }
+export function getBaseTradeBurner(): BaseBurnerAccount {
+  const current = getOrCreateBaseBurner()
+  const state = JSON.parse(localStorage.getItem(baseTradeStorageKey(current.address)) || '{}')
+  return state.recorded ? rotateBaseBurner() : current
+}
 
 export const baseMainnetPublicClient = createPublicClient({
   chain: base,
@@ -83,11 +98,12 @@ export async function ensureBaseMainnetNetwork(): Promise<boolean> {
  * Gets or creates a local ephemeral burner for Base Mainnet.
  */
 export function getOrCreateBaseBurner(): BaseBurnerAccount {
-  let pk = localStorage.getItem(STORAGE_KEY_BURNER) as Hex | null
+  let pk = localStorage.getItem(`${burnerStorageKey()}:active`) as Hex | null
   if (!pk || !pk.startsWith('0x') || pk.length !== 66) {
     pk = generatePrivateKey()
-    localStorage.setItem(STORAGE_KEY_BURNER, pk)
+    localStorage.setItem(`${burnerStorageKey()}:active`, pk)
   }
+  archiveBurner(pk)
   const account = privateKeyToAccount(pk)
   return {
     address: account.address,
@@ -100,7 +116,8 @@ export function getOrCreateBaseBurner(): BaseBurnerAccount {
  */
 export function rotateBaseBurner(): BaseBurnerAccount {
   const pk = generatePrivateKey()
-  localStorage.setItem(STORAGE_KEY_BURNER, pk)
+  localStorage.setItem(`${burnerStorageKey()}:active`, pk)
+  archiveBurner(pk)
   const account = privateKeyToAccount(pk)
   return {
     address: account.address,

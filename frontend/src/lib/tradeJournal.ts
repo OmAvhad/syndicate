@@ -5,11 +5,11 @@ import { executeTwoLegExitSwap, FOLLOWER_BURNER_ADDRESS, FOLLOWER_BURNER_KEY, ty
 import { scopeKey, type PoolScope } from './shielded/storage'
 
 export interface TradeRecord {
-  _id: string; isCopyTrade: boolean; tradeIndex: number; symbol: string; side: string; amount: number
+  _id: string; network?: 'BASE_MAINNET' | 'SEPOLIA_TESTNET'; bracketOrderId?: string; isCopyTrade: boolean; tradeIndex: number; symbol: string; side: string; amount: number
   target: number; stopLoss: number; limit: number; status: string; createdAt: string; closedAt?: string
   burnerAccountAddress: string; executionTxHash: string; entryDeliveryTxHash?: string
   entryUsdcUnits?: string; wethUnits?: string; entryGasWei?: string; exitGasWei?: string
-  exitUsdcUnits?: string; realizedPnlUnits?: string; exitType?: 'tp' | 'sl'; receiptsVerified?: boolean
+  exitUsdcUnits?: string; realizedPnlUnits?: string; exitType?: 'tp' | 'sl' | 'protective'; receiptsVerified?: boolean
   exitReturnTxHash?: string; exitPayoutTxHash?: string; promiseId?: string; claimEntityKey?: string
 }
 export const usdc = (units?: string) => units === undefined ? '—' : formatUnits(BigInt(units), 6)
@@ -39,6 +39,7 @@ export async function closeTrade(scope: PoolScope, tradeId: string, exitType: 't
     if (!lock) throw new Error('This exit is already running in another tab.')
     const trade = await getTrade(tradeId)
     if (trade.status === 'CLOSED') throw new Error('This position is already closed. Refresh history.')
+    if (trade.network === 'BASE_MAINNET') throw new Error('Base positions use Definitive protective orders. Sepolia demo exits cannot close them.')
     const key = executionKey(scope, trade)
     const storageKey = `${scopeKey(scope)}:exit:${tradeId}`
     const saved = JSON.parse(localStorage.getItem(storageKey) || 'null') || { exitType }

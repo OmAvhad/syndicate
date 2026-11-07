@@ -40,7 +40,7 @@ interface SignalContextType {
   closeCopyModal: () => void
   dismissSignal: (signalId: string) => void
   decryptSignal: (signalId: string, refreshEncryption?: boolean) => Promise<{ success: boolean; error?: string }>
-  executeCopyTrade: (signalId: string, customAmount: number, executionTxHash?: string, entryDeliveryTxHash?: string, burner?: string) => Promise<{ success: boolean; error?: string; tradeId?: string }>
+  executeCopyTrade: (signalId: string, customAmount: number, executionTxHash?: string, entryDeliveryTxHash?: string, burner?: string, definitiveOrderId?: string) => Promise<{ success: boolean; error?: string; tradeId?: string }>
   isConnected: boolean
   refreshSignals: () => Promise<void>
 }
@@ -308,7 +308,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
   }
 
   // Execute trade order for follower
-  const executeCopyTrade = async (signalId: string, customAmount: number, executionTxHash?: string, entryDeliveryTxHash?: string, burner?: string) => {
+  const executeCopyTrade = async (signalId: string, customAmount: number, executionTxHash?: string, entryDeliveryTxHash?: string, burner?: string, definitiveOrderId?: string) => {
     const target = signals.find((s) => s.signalId === signalId) || selectedSignal
     if (!target) return { success: false, error: 'Signal not found or expired' }
 
@@ -332,7 +332,7 @@ export function SignalProvider({ children }: { children: React.ReactNode }) {
         tradeIndex: target.tradeIndex || 1,
         network: target.network || 'SEPOLIA_TESTNET',
         definitiveQuoteId: target.definitiveQuoteId || null,
-        definitiveOrderId: target.definitiveOrderId || null,
+        definitiveOrderId: definitiveOrderId || target.definitiveOrderId || null,
         isCopyTrade: true,
         originalSignalId: target.signalId,
         executionTxHash: executionTxHash || undefined,

@@ -17,7 +17,8 @@ test('session RPC bypasses generic JWT middleware and always returns JSON-RPC en
   const originalFetch = globalThis.fetch;
   let upstream = { jsonrpc: '2.0', id: 1, result: { standard: { maxFeePerGas: '0x1' } } };
   const originalPost = axios.post;
-  axios.post = async () => ({ data: upstream, status: 200 });
+  let upstreamUrl;
+  axios.post = async (url) => { upstreamUrl = url; return { data: upstream, status: 200 }; };
   const request = async (path, body, token) => {
     const response = await originalFetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json() };
@@ -32,6 +33,11 @@ test('session RPC bypasses generic JWT middleware and always returns JSON-RPC en
     assert.equal(gas.body.jsonrpc, '2.0');
     assert.equal(gas.body.id, 7);
     assert.ok(gas.body.result.standard);
+    assert.ok(upstreamUrl.includes('/v2/11155111/rpc'));
+    const baseSession = await request('/api/pool/session', { sender: '0x1212121212121212121212121212121212121212', chainId: 8453 }, token);
+    await request(baseSession.body.path, rpc);
+    assert.ok(upstreamUrl.includes('/v2/8453/rpc'));
+    assert.equal((await request('/api/pool/session', { sender: '0x1212121212121212121212121212121212121212', chainId: 999 }, token)).status, 400);
     assert.equal((await request('/api/pool/bundler/expired', rpc)).body.error.code, -32001);
     assert.equal((await request(session.body.path, { ...rpc, method: 'unsupported' })).body.error.code, -32601);
     assert.equal((await request(session.body.path, { ...rpc, method: 'eth_sendUserOperation', params: [{ sender: '0xwrong' }] })).body.error.code, -32602);
