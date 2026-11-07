@@ -32,7 +32,7 @@ export default function TradeSignalBanner() {
       <div className="fixed bottom-6 right-6 z-40 max-w-sm w-full space-y-3 pointer-events-none">
         {signals.map((sig: TradeSignalItem) => {
           const isBuy = sig.side === 'BUY' || sig.side === 'LONG'
-          const isEncrypted = Boolean(sig.requiresMetaMaskDecrypt && !sig.isDecrypted)
+          const isEncrypted = !sig.isDecrypted || sig.limit == null
 
           return (
             <div
